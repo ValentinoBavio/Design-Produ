@@ -6,22 +6,15 @@ using UnityEngine.Rendering;
 
 public class PlayerMovement : MonoBehaviour
 {
-  
-
-
     private float moveSpeed;
     public float walkSpeed;
-  
 
     public float groundDrag;
 
-  
     public float jumpForce;
     public float jumpCooldown;
     public float airMultiplier;
     bool readyToJump;
-
-   
 
     /*
 
@@ -80,16 +73,4 @@ public class PlayerMovement : MonoBehaviour
 
 
     */
-
-
-
-
-
-
-
-
-
-
-
-
 }

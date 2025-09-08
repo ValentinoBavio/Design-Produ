@@ -24,9 +24,6 @@ public class Sliding : MonoBehaviour
     private float horizontalInput;
     private float verticalInput;
 
-    
-
-
     private void Start()
     {
         rb = GetComponent<Rigidbody>();
@@ -35,12 +32,10 @@ public class Sliding : MonoBehaviour
         startYScale = playerObj.localScale.y;
     }
 
-
-
     private void Update()
     {
-        horizontalInput = Input.GetAxisRaw("Horizontal"); // A y D
-        verticalInput = Input.GetAxisRaw("Vertical"); // W y S
+        horizontalInput = Input.GetAxisRaw("Horizontal");
+        verticalInput = Input.GetAxisRaw("Vertical");
 
         if (Input.GetKeyDown(slideKey) && (horizontalInput != 0 || verticalInput != 0))
         {
@@ -60,35 +55,31 @@ public class Sliding : MonoBehaviour
         }
     }
 
-
-
     private void StarSlide()
     {
         pm.sliding = true;
 
-        playerObj.localScale = new Vector3(playerObj.localScale.x, slideYScale, playerObj.localScale.z);
+        playerObj.localScale = new Vector3(
+            playerObj.localScale.x,
+            slideYScale,
+            playerObj.localScale.z
+        );
         rb.AddForce(Vector3.down * 5f, ForceMode.Impulse);
 
         slideTimer = maxSlideTime;
     }
 
-
-
-
-
     private void SlidingMovement()
     {
-        Vector3 inputDirection = orientation.forward * verticalInput + orientation.right * horizontalInput;
+        Vector3 inputDirection =
+            orientation.forward * verticalInput + orientation.right * horizontalInput;
 
-        //slide en piso
         if (!pm.OnSlope() || rb.velocity.y > -0.1f)
         {
             rb.AddForce(inputDirection.normalized * slideForce, ForceMode.Force);
 
             slideTimer -= Time.deltaTime;
         }
-
-        //slide en pendiente
         else
         {
             rb.AddForce(pm.GetSlopeMoveDirection(inputDirection) * slideForce, ForceMode.Force);
@@ -100,17 +91,14 @@ public class Sliding : MonoBehaviour
         }
     }
 
-
-
-
-
-
     private void StopSlide()
     {
         pm.sliding = false;
 
-        playerObj.localScale = new Vector3(playerObj.localScale.x, startYScale, playerObj.localScale.z);
+        playerObj.localScale = new Vector3(
+            playerObj.localScale.x,
+            startYScale,
+            playerObj.localScale.z
+        );
     }
-
-
 }

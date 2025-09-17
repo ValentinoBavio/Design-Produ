@@ -677,7 +677,7 @@ public class GrappleGun : MonoBehaviour
     }
 
     // STOP
-    void StopGrapple()
+    public void StopGrapple()
     {
         if (debugLogs)
             Debug.Log("[GrappleGun] StopGrapple()");

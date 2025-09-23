@@ -3,9 +3,16 @@ using System.Collections.Generic;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
 
 public class ControladorJuego : MonoBehaviour
 {
+    [SerializeField] TextMeshProUGUI _textoCrono;    
+
+    int _tiempoMinutos, _tiempoSegundos, _tiempoDecimales;     
+
+    #region Cronometro con circulo
+    
     [SerializeField] private float _tiempoMaximo;
 
     [SerializeField] private Slider slider;
@@ -33,13 +40,23 @@ public class ControladorJuego : MonoBehaviour
         if (_tiempoActual >= 0)
         {
             slider.value = _tiempoActual;
+            _textoCrono.text = Mathf.Ceil(_tiempoActual).ToString();
+
         }
 
         if (_tiempoActual <= 0)
         {
             Debug.Log("Derrota");
             CambiarTemporizador(false);
+            _textoCrono.text = "Derrota";
+            return;
         }
+
+        _tiempoMinutos = Mathf.FloorToInt(_tiempoActual / 60);
+        _tiempoSegundos = Mathf.FloorToInt(_tiempoActual % 60);
+
+
+        _textoCrono.text = string.Format("{0:00}:{1:00}", _tiempoMinutos, _tiempoSegundos);
     }
 
     private void CambiarTemporizador(bool estado)
@@ -58,4 +75,8 @@ public class ControladorJuego : MonoBehaviour
     {
         CambiarTemporizador(false);
     }
+    
+    #endregion
+
+
 }

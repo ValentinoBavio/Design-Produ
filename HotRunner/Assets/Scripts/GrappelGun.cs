@@ -3,10 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using TMPro;
 using UnityEngine;
+
 public class GrappleGun : MonoBehaviour
 {
     [Header("Input")]
-    public KeyCode grappleKey = KeyCode.E;      // disparo/retarget principal
+    public KeyCode grappleKey = KeyCode.E;       // disparo/retarget principal
     public KeyCode retargetKey = KeyCode.Mouse1; // retarget alterno (click)
 
     [Header("Cut behavior")]
@@ -16,7 +17,6 @@ public class GrappleGun : MonoBehaviour
     [Header("Salida visual")]
     [Tooltip("Avance hacia adelante del origen del tiro (desde la cámara).")]
     public float castStartOffset = 0.20f;
-
     [Tooltip("Desplazamiento lateral (derecha +) del origen del tiro (desde la cámara).")]
     public float fireRightOffset = 0.25f;
 
@@ -29,10 +29,8 @@ public class GrappleGun : MonoBehaviour
     [Header("Prompt UI")]
     [Tooltip("Texto TMP que aparece debajo de la mira (no se modifica en runtime).")]
     public TextMeshProUGUI promptText;
-
     [Tooltip("Velocidad de fade in/out del prompt.")]
     public float promptFadeSpeed = 8f;
-
     [Tooltip("Mostrar el prompt solo en Idle (recomendado).")]
     public bool showPromptOnlyWhenIdle = true;
 
@@ -55,9 +53,7 @@ public class GrappleGun : MonoBehaviour
     [Header("Top Band del anclaje (costado de la plataforma)")]
     public bool useFixedTopBand = true;
     public float topBandMeters = 1.0f;
-
-    [Range(0.05f, 0.95f)]
-    public float topBandFraction = 0.5f;
+    [Range(0.05f, 0.95f)] public float topBandFraction = 0.5f;
     public bool useAnchorRootBounds = true;
 
     [Header("Reach / Cast")]
@@ -70,16 +66,12 @@ public class GrappleGun : MonoBehaviour
     public float spring = 150f;
     public float damper = 12f;
     public float massScale = 4f;
-
-    [Range(0.2f, 1f)]
-    public float startSlackFactor = 0.9f;
+    [Range(0.2f, 1f)] public float startSlackFactor = 0.9f;
 
     [Header("Reel (encoger cuerda)")]
     public bool autoReelOnAttach = true;
     public float reelSpeed = 42f;
-
-    [Range(0.0f, 1.0f)]
-    public float reelSmooth = 0.45f;
+    [Range(0.0f, 1.0f)] public float reelSmooth = 0.45f;
 
     [Header("Pull Assist (fluidez extra)")]
     public float pullAssistAccel = 70f;
@@ -101,18 +93,14 @@ public class GrappleGun : MonoBehaviour
     public bool antiSwing = true;
     public float tangentialDamping = 28f;
     public float maxTangentialSpeed = 8f;
-
-    [Range(0f, 1.2f)]
-    public float gravityScaleWhileAttached = 0.6f;
+    [Range(0f, 1.2f)] public float gravityScaleWhileAttached = 0.6f;
     public float swingReelBoost = 1.2f;
 
     [Header("Robustez re-enganche")]
     [Tooltip("Rechaza reanclar demasiado cerca del punto actual o del último punto usado.")]
     public float minReanchorSeparation = 0.7f;
-
     [Tooltip("Ignorar el collider del ancla ACTUAL durante el cast.")]
     public bool ignoreAnchorDuringCast = true;
-
     [Tooltip("Ventana temporal para proteger de 'rebote' contra el ancla anterior (solo en anti-obstrucción).")]
     public float ignoreLastAnchorWindow = 0.5f;
 
@@ -120,7 +108,6 @@ public class GrappleGun : MonoBehaviour
     [Header("Single Rope (hard cut)")]
     [Tooltip("Si está activo, al recastear corta la cuerda actual, espera 1-2 FixedUpdates y luego dispara la nueva.")]
     public bool singleRopeHardCut = true;
-
     [Tooltip("Cuántos FixedUpdates esperar entre cortar y castear (1 suele bastar).")]
     public int hardCutDelayFrames = 1;
 
@@ -130,6 +117,19 @@ public class GrappleGun : MonoBehaviour
 
     [Header("Debug")]
     public bool debugLogs = false;
+
+    // =================== AUDIO ===================
+    [Header("Audio (Grapple)")]
+    [Tooltip("Fuente para reproducir disparo/attach/fail (one-shots).")]
+    public AudioSource sfxOneShot;
+    public AudioClip sfxShoot;       // disparo
+    public AudioClip sfxAttach;      // enganche
+    public AudioClip sfxFail;        // fallo
+
+    [Tooltip("Clip del 'grappeling' (one-shot cuando empezás a tirar de la cuerda).")]
+    public AudioClip sfxGrapplePull;
+    [Tooltip("Fuente dedicada para sfxGrapplePull (no loop, cortable).")]
+    public AudioSource sfxPullSource;
 
     // runtime
     Rigidbody rb;
@@ -146,7 +146,7 @@ public class GrappleGun : MonoBehaviour
     float ropeTraveled;
 
     float targetMaxDistance;
-    bool reeling;
+    bool reeling;       // mantener E en Attached
 
     bool isHanging;
     float baseSpring, baseDamper;
@@ -168,6 +168,12 @@ public class GrappleGun : MonoBehaviour
 
     bool spacePressedBuffered;
 
+    // Audio/session flags
+    bool castInProgress;          // hay un cast en curso
+    bool attachedThisCast;        // este cast ya enganchó
+    bool pullPlayedThisAttach;    // ya sonó el one-shot de 'grappeling' en este enganche
+    bool prevReeling;             // reeling del frame anterior (para flanco)
+
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
@@ -185,12 +191,25 @@ public class GrappleGun : MonoBehaviour
         baseSpring = spring;
         baseDamper = damper;
 
-        // Prompt UI init (no tocamos el texto)
+        // Prompt UI init
         if (promptText)
         {
             promptBaseColor = promptText.color;
             SetPromptAlphaImmediate(0f); // oculto al inicio
-            // Sugerencia: en el TMP desmarcá Raycast Target
+        }
+
+        // Audio/session init
+        castInProgress = false;
+        attachedThisCast = false;
+        pullPlayedThisAttach = false;
+        prevReeling = false;
+
+        // Config del pull source
+        if (sfxPullSource)
+        {
+            sfxPullSource.loop = false;
+            sfxPullSource.playOnAwake = false;
+            if (sfxPullSource.clip == null) sfxPullSource.clip = sfxGrapplePull;
         }
     }
 
@@ -200,91 +219,103 @@ public class GrappleGun : MonoBehaviour
             spacePressedBuffered = true;
 
         bool keyDown = Input.GetKeyDown(grappleKey);
-        bool keyUp = Input.GetKeyUp(grappleKey);
+        bool keyUp   = Input.GetKeyUp(grappleKey);
         bool keyHold = Input.GetKey(grappleKey);
 
         bool mouseDown = Input.GetKeyDown(retargetKey);
-        bool mouseUp = Input.GetKeyUp(retargetKey);
+        bool mouseUp   = Input.GetKeyUp(retargetKey);
 
-        // ---------- Mostrar/Ocultar Prompt según apuntado ----------
+        // ---------- Mostrar/Ocultar Prompt ----------
         UpdatePromptAim();
         TickPromptFade();
-        // -----------------------------------------------------------
+        // --------------------------------------------
 
         // START / RETARGET
         if (keyDown)
         {
             if (state == State.Idle)
             {
-                if (singleRopeHardCut)
-                    StartCoroutine(BeginAfterHardCut(Driver.Key));
-                else
-                    BeginCast(Driver.Key);
+                if (singleRopeHardCut) StartCoroutine(BeginAfterHardCut(Driver.Key));
+                else                   BeginCast(Driver.Key);
             }
             else
             {
-                if (singleRopeHardCut)
-                    StartCoroutine(RetargetAfterHardCut(Driver.Key));
-                else
-                    RetargetCast(Driver.Key);
+                if (singleRopeHardCut) StartCoroutine(RetargetAfterHardCut(Driver.Key));
+                else                   RetargetCast(Driver.Key);
             }
         }
 
         // Mouse1 NO inicia desde Idle; sólo retarget si hay sesión activa
         if (mouseDown && state != State.Idle)
         {
-            if (singleRopeHardCut)
-                StartCoroutine(RetargetAfterHardCut(Driver.Mouse));
-            else
-                RetargetCast(Driver.Mouse);
+            if (singleRopeHardCut) StartCoroutine(RetargetAfterHardCut(Driver.Mouse));
+            else                   RetargetCast(Driver.Mouse);
         }
 
         // STOP por soltar el botón que inició la sesión
-        if (keyUp && currentDriver == Driver.Key)
-            StopGrapple();
-
-        if (mouseUp && currentDriver == Driver.Mouse && stopOnRetargetRelease)
-            StopGrapple();
+        if (keyUp && currentDriver == Driver.Key) StopGrapple();
+        if (mouseUp && currentDriver == Driver.Mouse && stopOnRetargetRelease) StopGrapple();
 
         // Reel solo con E
         reeling = (state == State.Attached) && keyHold;
+
+        // --- One-shot 'grappeling' en flanco de subida de reeling ---
+        if (state == State.Attached && castInProgress && attachedThisCast)
+        {
+            // Subida: empezó a tirar -> sonar una vez (no vuelve a sonar hasta próximo attach)
+            if (!pullPlayedThisAttach && !prevReeling && reeling)
+            {
+                PlayPullStartIfNeeded();
+                pullPlayedThisAttach = true;
+            }
+
+            // Bajada: soltó la E -> cortar al instante
+            if (prevReeling && !reeling)
+            {
+                StopPullNow();
+            }
+        }
+        prevReeling = reeling; // actualizar memoria de flanco
     }
 
     void FixedUpdate()
     {
         switch (state)
         {
-            case State.Casting:
-                UpdateCasting();
-                break;
-            case State.Attached:
-                UpdateAttached();
-                break;
+            case State.Casting:  UpdateCasting();  break;
+            case State.Attached: UpdateAttached(); break;
         }
         spacePressedBuffered = false;
     }
 
-    // CAST helpers
+    // ================== CAST helpers ==================
     Vector3 ComputeOrigin()
     {
-        if (!firePoint)
-            return transform.position;
+        if (!firePoint) return transform.position;
         return firePoint.position
-            + firePoint.right * fireRightOffset
-            + firePoint.forward * castStartOffset;
+             + firePoint.right   * fireRightOffset
+             + firePoint.forward * castStartOffset;
     }
 
     Vector3 ComputeForward() => (firePoint ? firePoint.forward : transform.forward);
 
     void BeginCast(Driver driver)
     {
-        if (!firePoint)
-            return;
+        if (!firePoint) return;
 
         currentDriver = driver;
         state = State.Casting;
 
-        // Guardar info del ancla actual para proteger un rato contra obstrucción y reanclaje-cerca
+        // Audio/session flags
+        castInProgress = true;
+        attachedThisCast = false;
+        pullPlayedThisAttach = false;
+        prevReeling = false;
+
+        // One-shot: DISPARO
+        PlayOneShotSafe(sfxShoot, 1f);
+
+        // Guardar info del ancla actual para proteger contra obstrucción y reanclaje-cerca
         StashLastAnchor();
 
         Vector3 origin = ComputeOrigin();
@@ -294,7 +325,7 @@ public class GrappleGun : MonoBehaviour
 
         isHanging = false;
         RestoreJointTune();
-        ClearAnchorInfo(); // limpia el ancla ACTUAL (la "última" quedó stasheada)
+        ClearAnchorInfo(); // limpia el ancla ACTUAL
 
         if (lineRenderer)
         {
@@ -304,74 +335,32 @@ public class GrappleGun : MonoBehaviour
 
         noObstructionUntil = Time.time + Mathf.Max(0, obstructionGraceAfterRetarget);
 
-        if (debugLogs)
-            Debug.Log($"[GrappleGun] BeginCast() by {driver}");
+        if (debugLogs) Debug.Log($"[GrappleGun] BeginCast() by {driver}");
     }
 
-    // hard cut helpers
     IEnumerator BeginAfterHardCut(Driver d)
     {
-        // por si algo quedó enganchado (no debería en Idle), limpieza total
+        // limpieza total
         HardStop();
-        // esperar 1..N FixedUpdates para que el motor procese destrucción del joint
         int frames = Mathf.Max(1, hardCutDelayFrames);
-        for (int i = 0; i < frames; i++)
-            yield return new WaitForFixedUpdate();
+        for (int i = 0; i < frames; i++) yield return new WaitForFixedUpdate();
 
-        // comenzar
-        currentDriver = d;
-        state = State.Casting;
-
-        Vector3 origin = ComputeOrigin();
-        ropeTip = origin;
-        ropeDir = ComputeForward().normalized;
-        ropeTraveled = 0f;
-
-        isHanging = false;
-        RestoreJointTune();
-        ClearAnchorInfo();
-
-        if (lineRenderer)
-        {
-            lineRenderer.enabled = true;
-            UpdateLine(ropeTip);
-        }
-        noObstructionUntil = Time.time + Mathf.Max(0, obstructionGraceAfterRetarget);
+        BeginCast(d);
     }
 
     IEnumerator RetargetAfterHardCut(Driver d)
     {
-        // cortar la cuerda actual y limpiar por completo
+        // cortar actual y limpiar
         HardStop();
         int frames = Mathf.Max(1, hardCutDelayFrames);
-        for (int i = 0; i < frames; i++)
-            yield return new WaitForFixedUpdate();
+        for (int i = 0; i < frames; i++) yield return new WaitForFixedUpdate();
 
-        // arrancar nuevo cast
-        currentDriver = d;
-        state = State.Casting;
-
-        Vector3 origin = ComputeOrigin();
-        ropeTip = origin;
-        ropeDir = ComputeForward().normalized;
-        ropeTraveled = 0f;
-
-        isHanging = false;
-        RestoreJointTune();
-        ClearAnchorInfo();
-
-        if (lineRenderer)
-        {
-            lineRenderer.enabled = true;
-            UpdateLine(ropeTip);
-        }
-        noObstructionUntil = Time.time + Mathf.Max(0, obstructionGraceAfterRetarget);
+        BeginCast(d);
     }
 
     void RetargetCast(Driver driver)
     {
-        if (debugLogs)
-            Debug.Log($"[GrappleGun] RetargetCast() by {driver}");
+        if (debugLogs) Debug.Log($"[GrappleGun] RetargetCast() by {driver}");
 
         currentDriver = driver;
 
@@ -384,6 +373,15 @@ public class GrappleGun : MonoBehaviour
             joint = null;
         }
         state = State.Casting;
+
+        // Audio/session flags
+        castInProgress = true;
+        attachedThisCast = false;
+        pullPlayedThisAttach = false;
+        prevReeling = false;
+
+        // One-shot: DISPARO (retarget)
+        PlayOneShotSafe(sfxShoot, 1f);
 
         Vector3 origin = ComputeOrigin();
         ropeTip = origin;
@@ -414,8 +412,7 @@ public class GrappleGun : MonoBehaviour
             {
                 grapplePoint = hit.point;
                 ropeTip = grapplePoint;
-                if (lineRenderer)
-                    UpdateLine(ropeTip);
+                if (lineRenderer) UpdateLine(ropeTip);
                 AttachJoint(hit);
                 return;
             }
@@ -423,29 +420,20 @@ public class GrappleGun : MonoBehaviour
 
         ropeTip = nextTip;
         ropeTraveled += step;
-        if (lineRenderer)
-            UpdateLine(ropeTip);
+        if (lineRenderer) UpdateLine(ropeTip);
 
         if (ropeTraveled >= maxGrappleDistance)
-            StopGrapple();
+        {
+            // FIN DE CAST SIN IMPACTO -> FAIL
+            StopGrapple(true);
+        }
     }
 
     // Filtro de impactos para adquirir nuevo ancla
-    bool SphereCastFiltered(
-        Vector3 origin,
-        Vector3 dir,
-        out RaycastHit bestHit,
-        float dist,
-        LayerMask mask
-    )
+    bool SphereCastFiltered(Vector3 origin, Vector3 dir, out RaycastHit bestHit, float dist, LayerMask mask)
     {
         var hits = Physics.SphereCastAll(
-            origin,
-            castRadius,
-            dir,
-            dist,
-            mask,
-            QueryTriggerInteraction.Ignore
+            origin, castRadius, dir, dist, mask, QueryTriggerInteraction.Ignore
         );
         bestHit = default;
         float best = float.MaxValue;
@@ -456,17 +444,12 @@ public class GrappleGun : MonoBehaviour
         for (int i = 0; i < hits.Length; i++)
         {
             var h = hits[i];
-            if (h.collider == null)
-                continue;
+            if (h.collider == null) continue;
 
-            if (IsOwnCollider(h.collider))
-                continue;
-            if (ignoreAnchorDuringCast && IsAnchorCollider(h.collider))
-                continue;
-            if (state == State.Attached && (grapplePoint - h.point).sqrMagnitude < minSq)
-                continue;
-            if (checkLastPoint && (lastAnchorPoint - h.point).sqrMagnitude < minSq)
-                continue;
+            if (IsOwnCollider(h.collider)) continue;
+            if (ignoreAnchorDuringCast && IsAnchorCollider(h.collider)) continue;
+            if (state == State.Attached && (grapplePoint - h.point).sqrMagnitude < minSq) continue;
+            if (checkLastPoint && (lastAnchorPoint - h.point).sqrMagnitude < minSq) continue;
 
             if (h.distance < best)
             {
@@ -491,7 +474,7 @@ public class GrappleGun : MonoBehaviour
         }
     }
 
-    // ATTACH
+    // ================== ATTACH ==================
     void AttachJoint(RaycastHit hit)
     {
         attachHit = hit;
@@ -514,11 +497,15 @@ public class GrappleGun : MonoBehaviour
         reeling = autoReelOnAttach;
 
         state = State.Attached;
-        if (lineRenderer)
-            UpdateLine(grapplePoint);
+        if (lineRenderer) UpdateLine(grapplePoint);
 
-        if (debugLogs)
-            Debug.Log("[GrappleGun] Attached at " + grapplePoint);
+        // Audio: ATTACH y preparar el 'grappeling' one-shot
+        attachedThisCast = true;
+        pullPlayedThisAttach = false;
+        prevReeling = false; // el primer frame con E apretada cuenta como flanco
+        PlayOneShotSafe(sfxAttach, 1f);
+
+        if (debugLogs) Debug.Log("[GrappleGun] Attached at " + grapplePoint);
     }
 
     void UpdateAttached()
@@ -536,14 +523,12 @@ public class GrappleGun : MonoBehaviour
 
                 bool withinDist = distNow <= mantleTriggerDistance;
                 bool withinVertical =
-                    verticalDelta >= mantleMinVerticalDelta
-                    && verticalDelta <= mantleMaxVerticalDelta;
+                    verticalDelta >= mantleMinVerticalDelta &&
+                    verticalDelta <= mantleMaxVerticalDelta;
                 bool topBandOK = AnchorIsInTopBand(attachHit);
 
                 if (debugLogs)
-                    Debug.Log(
-                        $"[GrappleGun] MantleTry d:{distNow:F2}/{mantleTriggerDistance} vΔ:{verticalDelta:F2} tb:{topBandOK}"
-                    );
+                    Debug.Log($"[GrappleGun] MantleTry d:{distNow:F2}/{mantleTriggerDistance} vΔ:{verticalDelta:F2} tb:{topBandOK}");
 
                 if (withinDist && withinVertical && topBandOK)
                 {
@@ -572,14 +557,11 @@ public class GrappleGun : MonoBehaviour
         float newTarget = Mathf.Max(hangLockDistance, targetMaxDistance - reelDt - extra);
 
         targetMaxDistance = Mathf.Lerp(
-            targetMaxDistance,
-            newTarget,
-            1f - Mathf.Exp(-reelSmooth * 60f * Time.fixedDeltaTime)
+            targetMaxDistance, newTarget, 1f - Mathf.Exp(-reelSmooth * 60f * Time.fixedDeltaTime)
         );
         joint.maxDistance = Mathf.Min(joint.maxDistance, targetMaxDistance);
         joint.minDistance = Mathf.Min(
-            joint.minDistance,
-            Mathf.Max(hangLockDistance * 0.25f, targetMaxDistance * 0.25f)
+            joint.minDistance, Mathf.Max(hangLockDistance * 0.25f, targetMaxDistance * 0.25f)
         );
 
         rb.AddForce(dir * pullAssistAccel, ForceMode.Acceleration);
@@ -643,22 +625,13 @@ public class GrappleGun : MonoBehaviour
                 // SOLO capas "anclables" (las del grapple)
                 int mask = grappleMask;
 
-                if (
-                    Physics.SphereCast(
-                        castFrom,
-                        obstructCheckRadius,
-                        path.normalized,
-                        out RaycastHit hit,
-                        castLen,
-                        mask,
-                        QueryTriggerInteraction.Ignore
-                    )
-                )
+                if (Physics.SphereCast(
+                        castFrom, obstructCheckRadius, path.normalized,
+                        out RaycastHit hit, castLen, mask, QueryTriggerInteraction.Ignore))
                 {
                     bool isOwn = IsOwnCollider(hit.collider);
                     bool isCurrent = IsAnchorCollider(hit.collider);
-                    bool isOld =
-                        (Time.time <= lastAnchorUntilTime) && IsOldAnchorCollider(hit.collider);
+                    bool isOld = (Time.time <= lastAnchorUntilTime) && IsOldAnchorCollider(hit.collider);
 
                     if (!isOwn && !isCurrent && !isOld)
                         StopGrapple();
@@ -666,14 +639,12 @@ public class GrappleGun : MonoBehaviour
             }
         }
 
-        if (lineRenderer)
-            UpdateLine(grapplePoint);
+        if (lineRenderer) UpdateLine(grapplePoint);
     }
 
     void RestoreJointTune()
     {
-        if (joint == null)
-            return;
+        if (joint == null) return;
         joint.spring = baseSpring;
         joint.damper = baseDamper;
     }
@@ -681,27 +652,28 @@ public class GrappleGun : MonoBehaviour
     // VISUAL
     void UpdateLine(Vector3 end)
     {
-        if (!lineRenderer)
-            return;
+        if (!lineRenderer) return;
         Vector3 start = ComputeOrigin();
         lineRenderer.SetPosition(0, start);
         lineRenderer.SetPosition(1, end);
     }
 
-    // STOP
-    public void StopGrapple()
+    // ================== STOP ==================
+    public void StopGrapple(bool playFail = false)
     {
-        if (debugLogs)
-            Debug.Log("[GrappleGun] StopGrapple()");
+        if (debugLogs) Debug.Log("[GrappleGun] StopGrapple()");
+
+        // FAIL: solo si veníamos casteando y no pegamos
+        if (playFail && castInProgress && !attachedThisCast)
+            PlayOneShotSafe(sfxFail, 1f);
 
         // Guarda ancla actual para la ventana anti-rebote
         StashLastAnchor();
 
-        if (joint)
-            Destroy(joint);
+        if (joint) Destroy(joint);
         joint = null;
 
-        // apagar y resetear la línea, evita “tira al inicio”
+        // apagar línea
         if (lineRenderer)
         {
             lineRenderer.enabled = false;
@@ -710,22 +682,30 @@ public class GrappleGun : MonoBehaviour
             lineRenderer.SetPosition(0, s);
             lineRenderer.SetPosition(1, s);
         }
+
+        // cortar sonido de pull si estuviera sonando
+        StopPullNow();
 
         state = State.Idle;
         currentDriver = Driver.None;
         isHanging = false;
         reeling = false;
 
-        // limpiar ancla actual y punto (evita referencias viejas)
+        // limpiar ancla actual y punto
         grapplePoint = transform.position;
         ClearAnchorInfo();
+
+        // reset flags de sesión/audio
+        castInProgress = false;
+        attachedThisCast = false;
+        pullPlayedThisAttach = false;
+        prevReeling = false;
     }
 
     // Corte duro: NO stashea last anchor y limpia todo
     void HardStop()
     {
-        if (joint)
-            Destroy(joint);
+        if (joint) Destroy(joint);
         joint = null;
 
         if (lineRenderer)
@@ -736,6 +716,9 @@ public class GrappleGun : MonoBehaviour
             lineRenderer.SetPosition(0, s);
             lineRenderer.SetPosition(1, s);
         }
+
+        // cortar sonido de pull si estuviera sonando
+        StopPullNow();
 
         state = State.Idle;
         currentDriver = Driver.None;
@@ -748,6 +731,11 @@ public class GrappleGun : MonoBehaviour
         lastAnchorRoot = null;
         lastAnchorPoint = Vector3.zero;
         lastAnchorUntilTime = 0f;
+
+        castInProgress = false;
+        attachedThisCast = false;
+        pullPlayedThisAttach = false;
+        prevReeling = false;
     }
 
     void ClearAnchorInfo()
@@ -760,34 +748,28 @@ public class GrappleGun : MonoBehaviour
     // Helpers
     bool IsOwnCollider(Collider c)
     {
-        if (c == null || selfCols == null)
-            return false;
+        if (c == null || selfCols == null) return false;
         for (int i = 0; i < selfCols.Length; i++)
-            if (selfCols[i] == c)
-                return true;
+            if (selfCols[i] == c) return true;
         return false;
     }
 
     bool IsAnchorCollider(Collider c)
     {
-        if (c == null)
-            return false;
-        if (anchorCollider != null && c == anchorCollider)
-            return true;
+        if (c == null) return false;
+        if (anchorCollider != null && c == anchorCollider) return true;
 
         if (anchorRoot != null)
         {
             Transform t = c.transform;
-            if (t == anchorRoot || t.IsChildOf(anchorRoot) || anchorRoot.IsChildOf(t))
-                return true;
+            if (t == anchorRoot || t.IsChildOf(anchorRoot) || anchorRoot.IsChildOf(t)) return true;
         }
         return false;
     }
 
     bool IsOldAnchorCollider(Collider c)
     {
-        if (c == null || lastAnchorRoot == null)
-            return false;
+        if (c == null || lastAnchorRoot == null) return false;
         Transform t = c.transform;
         return (t == lastAnchorRoot || t.IsChildOf(lastAnchorRoot) || lastAnchorRoot.IsChildOf(t));
     }
@@ -795,20 +777,17 @@ public class GrappleGun : MonoBehaviour
     // Check de superficie alta de plataforma
     bool AnchorIsInTopBand(RaycastHit hit)
     {
-        if (hit.collider == null)
-            return false;
+        if (hit.collider == null) return false;
 
-        Bounds b = useAnchorRootBounds
-            ? GetHierarchyBounds(hit.collider.transform.root)
-            : hit.collider.bounds;
+        Bounds b = useAnchorRootBounds ? GetHierarchyBounds(hit.collider.transform.root)
+                                       : hit.collider.bounds;
 
         float topY = b.max.y;
         float bottomY = b.min.y;
         float height = Mathf.Max(0.0001f, topY - bottomY);
 
-        float band = useFixedTopBand
-            ? Mathf.Min(topBandMeters, height)
-            : height * Mathf.Clamp01(topBandFraction);
+        float band = useFixedTopBand ? Mathf.Min(topBandMeters, height)
+                                     : height * Mathf.Clamp01(topBandFraction);
         float thresholdY = topY - band;
 
         return hit.point.y >= thresholdY;
@@ -822,43 +801,28 @@ public class GrappleGun : MonoBehaviour
         var cols = root.GetComponentsInChildren<Collider>(true);
         foreach (var c in cols)
         {
-            if (c == null)
-                continue;
-            if (!hasAny)
-            {
-                combined = c.bounds;
-                hasAny = true;
-            }
-            else
-                combined.Encapsulate(c.bounds);
+            if (c == null) continue;
+            if (!hasAny) { combined = c.bounds; hasAny = true; }
+            else combined.Encapsulate(c.bounds);
         }
 
         var rends = root.GetComponentsInChildren<Renderer>(true);
         foreach (var r in rends)
         {
-            if (r == null)
-                continue;
-            if (!hasAny)
-            {
-                combined = r.bounds;
-                hasAny = true;
-            }
-            else
-                combined.Encapsulate(r.bounds);
+            if (r == null) continue;
+            if (!hasAny) { combined = r.bounds; hasAny = true; }
+            else combined.Encapsulate(r.bounds);
         }
 
-        if (!hasAny)
-            combined = new Bounds(root.position, Vector3.one * 0.01f);
+        if (!hasAny) combined = new Bounds(root.position, Vector3.one * 0.01f);
         return combined;
     }
 
     void OnDisable() => HardStop();
 
     // ==================== PROMPT UI LOGIC ====================
-
     void UpdatePromptAim()
     {
-        // Mostrar solo en Idle si está activado
         if (showPromptOnlyWhenIdle && state != State.Idle)
         {
             SetPromptVisible(false);
@@ -871,31 +835,22 @@ public class GrappleGun : MonoBehaviour
             return;
         }
 
-        // SphereCast hacia adelante usando el mismo LayerMask del grapple
         Vector3 origin = ComputeOrigin();
         Vector3 dir = ComputeForward().normalized;
 
-        // Chequeo a lo largo del alcance total
         bool hasHit = Physics.SphereCast(
-            origin,
-            castRadius,
-            dir,
-            out RaycastHit hit,
-            maxGrappleDistance,
-            grappleMask,
-            QueryTriggerInteraction.Ignore
+            origin, castRadius, dir,
+            out RaycastHit hit, maxGrappleDistance, grappleMask, QueryTriggerInteraction.Ignore
         );
 
         if (hasHit)
         {
-            // Ignorar self y, si corresponde, el ancla actual
             if (IsOwnCollider(hit.collider) || (ignoreAnchorDuringCast && IsAnchorCollider(hit.collider)))
             {
                 SetPromptVisible(false);
                 return;
             }
 
-            // Respetar distancia mínima para anclar
             float d = Vector3.Distance(transform.position, hit.point);
             if (d >= minAnchorDistance)
             {
@@ -927,5 +882,28 @@ public class GrappleGun : MonoBehaviour
         if (!promptText) return;
         var col = promptText.color;
         promptText.color = new Color(col.r, col.g, col.b, a);
+    }
+
+    // ==================== AUDIO HELPERS ====================
+    void PlayOneShotSafe(AudioClip clip, float vol = 1f)
+    {
+        if (!clip || sfxOneShot == null) return;
+        sfxOneShot.PlayOneShot(clip, vol);
+    }
+
+    void PlayPullStartIfNeeded()
+    {
+        if (!sfxPullSource || (sfxPullSource.clip == null && sfxGrapplePull == null)) return;
+        if (sfxPullSource.clip == null) sfxPullSource.clip = sfxGrapplePull;
+        // por si quedó algo colgado
+        sfxPullSource.Stop();
+        sfxPullSource.time = 0f;
+        sfxPullSource.Play();
+    }
+
+    void StopPullNow()
+    {
+        if (sfxPullSource && sfxPullSource.isPlaying)
+            sfxPullSource.Stop();
     }
 }

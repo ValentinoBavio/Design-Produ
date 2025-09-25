@@ -2,7 +2,6 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-
 public class PlayerMovementAdvanced_ : MonoBehaviour
 {
     [Header("Refs")]
@@ -75,6 +74,10 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
     public float airMaxHorizontalSpeed = 40f;
     public float afterSlideJumpNoControlTime = 0.18f;
 
+    [Header("Audio Slide")]
+    [Tooltip("Arrastrá aquí el componente ProceduralSlideNoise del Player (opcional).")]
+    public ProceduralSlideNoise slideNoise;
+
     [Header("Debug")]
     public bool debugRays = false;
 
@@ -118,6 +121,9 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
                 headStandY,
                 head.localPosition.z
             );
+
+        // aseguro audio apagado al inicio
+        if (slideNoise) slideNoise.sliding = false;
     }
 
     void Update()
@@ -178,9 +184,12 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
 
             rb.AddForce(dir * slideImpulse, ForceMode.VelocityChange);
 
-            Vector3 hv = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
-            if (hv.magnitude < slideConstantSpeed)
+            Vector3 hv0 = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+            if (hv0.magnitude < slideConstantSpeed)
                 rb.velocity = dir * slideConstantSpeed + Vector3.up * rb.velocity.y;
+
+            // --- AUDIO: encender ---
+            if (slideNoise) slideNoise.sliding = true;
         }
 
         // Crouch normal (hold)
@@ -236,6 +245,13 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
         if (slideExitLockTimer > 0f) slideExitLockTimer -= Time.fixedDeltaTime;
         if (airControlBlockTimer > 0f) airControlBlockTimer -= Time.fixedDeltaTime;
 
+        // ---- AUDIO: actualizar velocidad horizontal para modular el sonido ----
+        if (slideNoise)
+        {
+            Vector3 horizVel = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+            slideNoise.speed = horizVel.magnitude;   // m/s
+        }
+
         // Slide-Jump: buffer + coyote + requisito "empezó en slope" (si está activado)
         if (slideJumpQueued)
         {
@@ -255,6 +271,8 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
                 {
                     isSliding = false;
                     StopCrouch();
+                    // --- AUDIO: apagar ---
+                    if (slideNoise) slideNoise.sliding = false;
                 }
 
                 // Dirección: SIEMPRE horizontal hacia donde mirás (sin apuntar al piso)
@@ -305,6 +323,8 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
             {
                 isSliding = false;
                 StopCrouch();
+                // --- AUDIO: apagar ---
+                if (slideNoise) slideNoise.sliding = false;
                 return;
             }
 
@@ -346,6 +366,8 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
                 {
                     isSliding = false;
                     StopCrouch();
+                    // --- AUDIO: apagar ---
+                    if (slideNoise) slideNoise.sliding = false;
                 }
             }
             return;

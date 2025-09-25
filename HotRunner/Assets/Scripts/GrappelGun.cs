@@ -1,13 +1,12 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using TMPro;
 using UnityEngine;
-
-[DisallowMultipleComponent]
 public class GrappleGun : MonoBehaviour
 {
     [Header("Input")]
-    public KeyCode grappleKey = KeyCode.E; // disparo/retarget principal
+    public KeyCode grappleKey = KeyCode.E;      // disparo/retarget principal
     public KeyCode retargetKey = KeyCode.Mouse1; // retarget alterno (click)
 
     [Header("Cut behavior")]
@@ -25,6 +24,22 @@ public class GrappleGun : MonoBehaviour
     public Transform firePoint; // normalmente la Main Camera
     public LineRenderer lineRenderer; // Use World Space = ON
     public LayerMask grappleMask = ~0;
+
+    // ---------- UI: Prompt debajo de la mira ----------
+    [Header("Prompt UI")]
+    [Tooltip("Texto TMP que aparece debajo de la mira (no se modifica en runtime).")]
+    public TextMeshProUGUI promptText;
+
+    [Tooltip("Velocidad de fade in/out del prompt.")]
+    public float promptFadeSpeed = 8f;
+
+    [Tooltip("Mostrar el prompt solo en Idle (recomendado).")]
+    public bool showPromptOnlyWhenIdle = true;
+
+    float promptTargetAlpha;   // 0 = oculto, 1 = visible
+    Color promptBaseColor;     // para interpolar alfa
+    bool promptVisible;        // estado lógico de visibilidad
+    // ---------------------------------------------------
 
     //Integración con LedgeMantle
     [Header("LedgeMantle")]
@@ -98,16 +113,12 @@ public class GrappleGun : MonoBehaviour
     [Tooltip("Ignorar el collider del ancla ACTUAL durante el cast.")]
     public bool ignoreAnchorDuringCast = true;
 
-    [Tooltip(
-        "Ventana temporal para proteger de 'rebote' contra el ancla anterior (solo en anti-obstrucción)."
-    )]
+    [Tooltip("Ventana temporal para proteger de 'rebote' contra el ancla anterior (solo en anti-obstrucción).")]
     public float ignoreLastAnchorWindow = 0.5f;
 
     // una sola cuerda visible “hard-cut” antes de recastear
     [Header("Single Rope (hard cut)")]
-    [Tooltip(
-        "Si está activo, al recastear corta la cuerda actual, espera 1-2 FixedUpdates y luego dispara la nueva."
-    )]
+    [Tooltip("Si está activo, al recastear corta la cuerda actual, espera 1-2 FixedUpdates y luego dispara la nueva.")]
     public bool singleRopeHardCut = true;
 
     [Tooltip("Cuántos FixedUpdates esperar entre cortar y castear (1 suele bastar).")]
@@ -125,34 +136,20 @@ public class GrappleGun : MonoBehaviour
     SpringJoint joint;
     Vector3 grapplePoint;
 
-    enum State
-    {
-        Idle,
-        Casting,
-        Attached,
-    }
-
+    enum State { Idle, Casting, Attached }
     State state = State.Idle;
 
-    enum Driver
-    {
-        None,
-        Key,
-        Mouse,
-    }
-
+    enum Driver { None, Key, Mouse }
     Driver currentDriver = Driver.None;
 
-    Vector3 ropeTip,
-        ropeDir;
+    Vector3 ropeTip, ropeDir;
     float ropeTraveled;
 
     float targetMaxDistance;
     bool reeling;
 
     bool isHanging;
-    float baseSpring,
-        baseDamper;
+    float baseSpring, baseDamper;
 
     Collider[] selfCols;
 
@@ -187,6 +184,14 @@ public class GrappleGun : MonoBehaviour
         selfCols = GetComponentsInChildren<Collider>(true);
         baseSpring = spring;
         baseDamper = damper;
+
+        // Prompt UI init (no tocamos el texto)
+        if (promptText)
+        {
+            promptBaseColor = promptText.color;
+            SetPromptAlphaImmediate(0f); // oculto al inicio
+            // Sugerencia: en el TMP desmarcá Raycast Target
+        }
     }
 
     void Update()
@@ -200,6 +205,11 @@ public class GrappleGun : MonoBehaviour
 
         bool mouseDown = Input.GetKeyDown(retargetKey);
         bool mouseUp = Input.GetKeyUp(retargetKey);
+
+        // ---------- Mostrar/Ocultar Prompt según apuntado ----------
+        UpdatePromptAim();
+        TickPromptFade();
+        // -----------------------------------------------------------
 
         // START / RETARGET
         if (keyDown)
@@ -292,7 +302,7 @@ public class GrappleGun : MonoBehaviour
             UpdateLine(ropeTip);
         }
 
-        noObstructionUntil = Time.time + Mathf.Max(0f, obstructionGraceAfterRetarget);
+        noObstructionUntil = Time.time + Mathf.Max(0, obstructionGraceAfterRetarget);
 
         if (debugLogs)
             Debug.Log($"[GrappleGun] BeginCast() by {driver}");
@@ -307,6 +317,7 @@ public class GrappleGun : MonoBehaviour
         int frames = Mathf.Max(1, hardCutDelayFrames);
         for (int i = 0; i < frames; i++)
             yield return new WaitForFixedUpdate();
+
         // comenzar
         currentDriver = d;
         state = State.Casting;
@@ -325,7 +336,7 @@ public class GrappleGun : MonoBehaviour
             lineRenderer.enabled = true;
             UpdateLine(ropeTip);
         }
-        noObstructionUntil = Time.time + Mathf.Max(0f, obstructionGraceAfterRetarget);
+        noObstructionUntil = Time.time + Mathf.Max(0, obstructionGraceAfterRetarget);
     }
 
     IEnumerator RetargetAfterHardCut(Driver d)
@@ -335,6 +346,7 @@ public class GrappleGun : MonoBehaviour
         int frames = Mathf.Max(1, hardCutDelayFrames);
         for (int i = 0; i < frames; i++)
             yield return new WaitForFixedUpdate();
+
         // arrancar nuevo cast
         currentDriver = d;
         state = State.Casting;
@@ -353,7 +365,7 @@ public class GrappleGun : MonoBehaviour
             lineRenderer.enabled = true;
             UpdateLine(ropeTip);
         }
-        noObstructionUntil = Time.time + Mathf.Max(0f, obstructionGraceAfterRetarget);
+        noObstructionUntil = Time.time + Mathf.Max(0, obstructionGraceAfterRetarget);
     }
 
     void RetargetCast(Driver driver)
@@ -387,7 +399,7 @@ public class GrappleGun : MonoBehaviour
             lineRenderer.enabled = true;
             UpdateLine(ropeTip);
         }
-        noObstructionUntil = Time.time + Mathf.Max(0f, obstructionGraceAfterRetarget);
+        noObstructionUntil = Time.time + Mathf.Max(0, obstructionGraceAfterRetarget);
     }
 
     void UpdateCasting()
@@ -841,4 +853,79 @@ public class GrappleGun : MonoBehaviour
     }
 
     void OnDisable() => HardStop();
+
+    // ==================== PROMPT UI LOGIC ====================
+
+    void UpdatePromptAim()
+    {
+        // Mostrar solo en Idle si está activado
+        if (showPromptOnlyWhenIdle && state != State.Idle)
+        {
+            SetPromptVisible(false);
+            return;
+        }
+
+        if (!promptText || !firePoint)
+        {
+            SetPromptVisible(false);
+            return;
+        }
+
+        // SphereCast hacia adelante usando el mismo LayerMask del grapple
+        Vector3 origin = ComputeOrigin();
+        Vector3 dir = ComputeForward().normalized;
+
+        // Chequeo a lo largo del alcance total
+        bool hasHit = Physics.SphereCast(
+            origin,
+            castRadius,
+            dir,
+            out RaycastHit hit,
+            maxGrappleDistance,
+            grappleMask,
+            QueryTriggerInteraction.Ignore
+        );
+
+        if (hasHit)
+        {
+            // Ignorar self y, si corresponde, el ancla actual
+            if (IsOwnCollider(hit.collider) || (ignoreAnchorDuringCast && IsAnchorCollider(hit.collider)))
+            {
+                SetPromptVisible(false);
+                return;
+            }
+
+            // Respetar distancia mínima para anclar
+            float d = Vector3.Distance(transform.position, hit.point);
+            if (d >= minAnchorDistance)
+            {
+                SetPromptVisible(true);
+                return;
+            }
+        }
+
+        SetPromptVisible(false);
+    }
+
+    void SetPromptVisible(bool on)
+    {
+        promptVisible = on;
+        promptTargetAlpha = on ? 1f : 0f;
+    }
+
+    void TickPromptFade()
+    {
+        if (!promptText) return;
+
+        Color c = promptText.color;
+        float a = Mathf.MoveTowards(c.a, promptTargetAlpha, promptFadeSpeed * Time.deltaTime);
+        promptText.color = new Color(promptBaseColor.r, promptBaseColor.g, promptBaseColor.b, a);
+    }
+
+    void SetPromptAlphaImmediate(float a)
+    {
+        if (!promptText) return;
+        var col = promptText.color;
+        promptText.color = new Color(col.r, col.g, col.b, a);
+    }
 }

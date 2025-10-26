@@ -6,6 +6,8 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
 {
     [Header("Refs")]
     public Transform head; // "Head" (padre de la Main Camera)
+    [Tooltip("Opcional: referencia al WallRun para bloquear el doble salto mientras está activo.")]
+    public WallRun wallRunRef;
 
     [Header("Input")]
     public KeyCode jumpKey = KeyCode.Space;
@@ -24,6 +26,22 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
     [Header("Jump")]
     public float jumpForce = 7f;
 
+    [Header("Double Jump")]
+    public bool enableDoubleJump = true;
+    public int  extraJumps = 1;
+    [Tooltip("Fuerza vertical base del doble salto (se usa si el ángulo pide menos que esto).")]
+    public float doubleJumpForce = 7f;
+    [Tooltip("Carry horizontal mínimo del doble salto (en dirección de cámara).")]
+    public float djMinHorizSpeed = 11f;
+    [Tooltip("Bonus adelante si el carry proyectado es bajo.")]
+    public float djForwardBonus = 2.5f;
+    [Tooltip("Ángulo objetivo del doble salto, en grados (ej. 45 = diagonal).")]
+    [Range(5f, 60f)] public float djAngleDeg = 45f;
+    [Tooltip("Vertical máxima aplicada por el ángulo (para no lanzar demasiado).")]
+    public float djVertMax = 9f;
+    [Tooltip("Tiempo sin cap aéreo tras doble/slide jump (para no cortar el carry).")]
+    public float djNoCapTime = 0.15f;
+
     [Header("Crouch / Slide (colisión)")]
     public float standHeight = 1.8f;
     public float crouchHeight = 1.2f;
@@ -32,42 +50,69 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
 
     [Header("Slide Core")]
     public float minSpeedToSlide = 0f;
-    public float slideImpulse = 10f;           // impulso inicial
+    public float slideImpulse = 0f;    // sin impulso
     public float slideMinSpeedExit = 2.5f;
     public float slideExtraGravity = 20f;
     public float slideGroundCoyote = 0.15f;
 
-    [Header("Slide Steering")]
+    [Header("Slide Steering (asistencia)")]
     public float slopeAssist = 0f;
 
     [Header("Slide Speed Model (constante)")]
-    public float slideConstantSpeed = 16f;     // velocidad objetivo del slide
-    public float slideAccelToConst = 40f;      // qué tan rápido converge a esa velocidad
-    [Range(0f, 1f)]
-    public float keepHeading = 0.85f;          // 1 = mantiene rumbo inicial
+    public float slideConstantSpeed = 20.5f;
+    public float slideAccelToConst = 50f;
+    [Range(0f, 1f)] public float keepHeading = 0.85f;
 
     [Header("Slide Strafe (control lateral)")]
-    [Range(0f, 2f)]
-    public float slideStrafeInfluence = 0.8f;  // cuánto desvía A/D durante el slide
-    [Range(0.5f, 3f)]
-    public float slideStrafeExponent = 1.4f;   // >1 = más precisión al inicio, más mordida al final
-    [Range(0f, 1f)]
-    public float slideViewTurnAssist = 0.5f;   // ayuda a girar hacia donde mirás durante el slide
+    [Range(0f, 2f)] public float slideStrafeInfluence = 1.0f;
+    [Range(0.5f, 3f)] public float slideStrafeExponent = 1.4f;
+    [Range(0f, 1f)] public float slideViewTurnAssist = 0.25f;
+
+    [Header("Slide Lateral Limits")]
+    public float slideMaxLateralSpeed = 8f;
+    public float slideLateralAccel = 32f;
+    [Range(0f, 1f)] public float slideLateralEdgeGuard = 0.6f;
+    public float edgeProbeDistance = 0.6f;
+    public float edgeProbeDown = 1.0f;
+
+    [Header("Slide Alignment (fall line)")]
+    public bool alignToFallLine = true;
+    [Range(0f, 20f)] public float fallLineAlignStrength = 12f;
+    [Range(0f, 1f)] public float lateralDampOnEnter = 0.6f;
+
+    [Header("Slide Steer (giro del rumbo con A/D)")]
+    public float slideSteerYawDegPerSec = 140f;
+    [Range(0.5f, 3f)] public float slideSteerYawExponent = 1.4f;
+
+    [Header("QoL inicio de slide")]
+    public bool startOnLandingWhileHeld = true;
+    public bool autoSlideOnSlope = false;
+    public float slideStartMinForwardSpeed = 6f;
+    public bool autoStartSnapToConstSpeed = true;
+    public bool autoSlideIgnoreCrouchToSustain = true;
+
+    [Header("Arranque más responsivo (boost corto)")]
+    public float steerBoostDuration = 0.35f;
+    public float steerBoostLateralAccelMult = 1.5f;
+    public float steerBoostMaxLatMult = 1.2f;
+
+    [Header("Slide Entry Unify")]
+    public bool unifyEntrySpeed = true;
+    public bool entryClampExact = true;
 
     [Header("Slide Jump — alcance")]
-    [Range(5f, 60f)]
-    public float slideJumpAngleDeg = 28f;
+    [Range(5f, 60f)] public float slideJumpAngleDeg = 28f;
     public float slideJumpHorizFloor = 12f;
     public float slideJumpHorizBonus = 6f;
     public float slideJumpHorizMax = 22f;
     public float slideJumpVertMax = 9f;
-    public bool slideJumpProjectOnSlope = true; // no afecta la dirección (solo cálculo auxiliar)
+    public bool slideJumpProjectOnSlope = true;
 
     [Header("Slide Jump — responsiveness")]
-    public bool  slideJumpOnlyOnSlope = true;  // SOLO salto largo si el slide empezó en slope
-    public float slideJumpBuffer = 0.12f;      // ventana para colar el Space
-    public float slideJumpCoyote = 0.12f;      // ventana airborne en la que igual salta
-    public float slideJumpExitLock = 0.10f;    // bloquea salida del slide tras pedir salto
+    public bool  slideJumpOnlyOnSlope = true;
+    public float slideJumpBuffer = 0.12f;
+    public float slideJumpCoyote = 0.12f;
+    public float slideJumpExitLock = 0.10f;
 
     [Header("AIR CONTROL (no frena el impulso)")]
     public float airControlAccel = 10f;
@@ -75,37 +120,47 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
     public float afterSlideJumpNoControlTime = 0.18f;
 
     [Header("Audio Slide")]
-    [Tooltip("Arrastrá aquí el componente ProceduralSlideNoise del Player (opcional).")]
     public ProceduralSlideNoise slideNoise;
 
     [Header("Debug")]
     public bool debugRays = false;
+
+    // Hook no-cap aéreo (lo puede usar Grapple)
+    [HideInInspector] public bool suppressAirSpeedCap = false;
+    public void SetAirCapSuppressed(bool on) { suppressAirSpeedCap = on; }
+    float suppressAirCapUntil = 0f;
 
     Rigidbody rb;
     CapsuleCollider col;
 
     Vector3 inputDir;
     float inputXRaw;
-    bool isGrounded;
-    bool isCrouching;
-    bool isSliding;
-    float targetSpeed;
-    float timeAirWhileSliding;
+    bool isGrounded, wasGrounded, isCrouching, isSliding;
+    float targetSpeed, timeAirWhileSliding;
     Vector3 lastGroundNormal = Vector3.up;
     bool lastGroundIsSlope = false;
 
     // Slide jump control
     bool   slideJumpQueued;
-    float  slideJumpQueuedUntil;   // Time.time límite del buffer
-    Vector3 queuedJumpForward;     // no se usa para dirección final (solo respaldo)
+    float  slideJumpQueuedUntil;
     float  airControlBlockTimer;
-    float  slideExitLockTimer;     // impide terminar el slide justo cuando pediste salto
+    float  slideExitLockTimer;
 
-    // rumbo al iniciar slide
+    // Slide forward
+    Vector3 slideForwardCurrent = Vector3.forward;
     Vector3 slideStartDirPlanar = Vector3.forward;
 
-    // recordar si el slide comenzó sobre slope
+    enum SlideStartMode { Manual, LandingHeld, AutoSlope }
+    SlideStartMode currentStartMode = SlideStartMode.Manual;
+
+    float steerBoostTimer = 0f;
     bool slideOnSlopeAtStart = false;
+
+    // Doble salto
+    int  jumpsLeft;
+
+    // Cache de forward planar robusto
+    Vector3 lastGoodPlanarForward = Vector3.forward;
 
     void Awake()
     {
@@ -115,28 +170,22 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
         col.height = standHeight;
         col.center = new Vector3(0f, standHeight * 0.5f, 0f);
 
-        if (head != null)
-            head.localPosition = new Vector3(
-                head.localPosition.x,
-                headStandY,
-                head.localPosition.z
-            );
+        if (head)
+            head.localPosition = new Vector3(head.localPosition.x, headStandY, head.localPosition.z);
 
-        // aseguro audio apagado al inicio
         if (slideNoise) slideNoise.sliding = false;
+
+        jumpsLeft = extraJumps;
+
+        if (!wallRunRef) wallRunRef = GetComponent<WallRun>(); // si existe en el mismo GO
     }
 
     void Update()
     {
-        if (rb != null && rb.isKinematic)
-            return;
+        if (rb && rb.isKinematic) return;
 
-        Vector3 planarForward = head
-            ? Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized
-            : Vector3.forward;
-        Vector3 planarRight = head
-            ? Vector3.ProjectOnPlane(head.right, Vector3.up).normalized
-            : Vector3.right;
+        Vector3 planarForward = GetCamPlanarForwardSafe();
+        Vector3 planarRight   = head ? Vector3.ProjectOnPlane(head.right, Vector3.up).normalized : Vector3.right;
 
         float x = Input.GetAxisRaw("Horizontal");
         float z = Input.GetAxisRaw("Vertical");
@@ -147,121 +196,98 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
         isGrounded = GroundInfo(out RaycastHit hit);
         if (isGrounded)
         {
-            lastGroundNormal = hit.normal;
+            lastGroundNormal  = hit.normal;
             lastGroundIsSlope = ((slopeMask.value & (1 << hit.collider.gameObject.layer)) != 0);
         }
-        else
-        {
-            lastGroundIsSlope = false;
-        }
+        else lastGroundIsSlope = false;
 
-        bool crouchHeld = Input.GetKey(crouchKey);
+        bool crouchHeld    = Input.GetKey(crouchKey);
         bool crouchPressed = Input.GetKeyDown(crouchKey);
-        bool jumpPressed = Input.GetKeyDown(jumpKey);
-        bool sprintHeld = Input.GetKey(sprintKey);
+        bool jumpPressed   = Input.GetKeyDown(jumpKey);
+        bool sprintHeld    = Input.GetKey(sprintKey);
 
-        float horizontalSpeed = new Vector2(rb.velocity.x, rb.velocity.z).magnitude;
-        bool movingForward = Vector3.Dot(planarForward, inputDir) > 0.25f;
+        // START SLIDE
+        if (!isSliding && crouchPressed && isGrounded && lastGroundIsSlope)
+            StartSlideNow(planarForward, SlideStartMode.Manual);
 
-        // START SLIDE — solo si estoy sobre Slope
-        if (!isSliding
-            && crouchPressed
-            && isGrounded
-            && lastGroundIsSlope
-            && (horizontalSpeed > minSpeedToSlide || movingForward))
-        {
-            StartCrouch();
-            isSliding = true;
-            timeAirWhileSliding = 0f;
+        if (startOnLandingWhileHeld && !wasGrounded && isGrounded && !isSliding && crouchHeld && lastGroundIsSlope)
+            StartSlideNow(planarForward, SlideStartMode.LandingHeld);
 
-            slideOnSlopeAtStart = true;
+        if (autoSlideOnSlope && !isSliding && isGrounded && lastGroundIsSlope)
+            StartSlideNow(planarForward, SlideStartMode.AutoSlope);
 
-            Vector3 planarVel = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
-            Vector3 dir = (planarVel.sqrMagnitude > 0.01f ? planarVel : inputDir).normalized;
-            if (dir == Vector3.zero) dir = planarForward;
+        // Crouch normal
+        if (!isSliding) { if (crouchHeld) StartCrouch(); else StopCrouch(); }
 
-            slideStartDirPlanar = dir;
-
-            rb.AddForce(dir * slideImpulse, ForceMode.VelocityChange);
-
-            Vector3 hv0 = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
-            if (hv0.magnitude < slideConstantSpeed)
-                rb.velocity = dir * slideConstantSpeed + Vector3.up * rb.velocity.y;
-
-            // --- AUDIO: encender ---
-            if (slideNoise) slideNoise.sliding = true;
-        }
-
-        // Crouch normal (hold)
-        if (!isSliding)
-        {
-            if (crouchHeld) StartCrouch();
-            else            StopCrouch();
-        }
-
-        // JUMP (buffer + coyote)
+        // JUMP
         if (jumpPressed)
         {
             if (isSliding)
             {
-                QueueSlideJump(planarForward);
+                QueueSlideJump();
             }
             else if (isGrounded)
             {
-                rb.velocity = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+                Vector3 v = rb.velocity;
+                float vy = (v.y < 0f) ? 0f : v.y;
+                rb.velocity = new Vector3(v.x, vy, v.z);
                 rb.AddForce(Vector3.up * jumpForce, ForceMode.VelocityChange);
+
+                jumpsLeft = extraJumps;
+            }
+            else if (enableDoubleJump && jumpsLeft > 0 && !(wallRunRef && wallRunRef.IsRunning)) // <-- bloquea si wallrun activo
+            {
+                DoDoubleJumpWithAngle();  // <-- ángulo/carry corregido
+                jumpsLeft--;
             }
         }
 
         // Vel objetivo (NO slide)
         if (!isSliding && isGrounded)
-        {
-            if      (crouchHeld) targetSpeed = crouchSpeed;
-            else if (sprintHeld) targetSpeed = sprintSpeed;
-            else                 targetSpeed = walkSpeed;
-        }
+            targetSpeed = Input.GetKey(crouchKey) ? crouchSpeed : (sprintHeld ? sprintSpeed : walkSpeed);
 
         if (isSliding)
-        {
-            if (!isGrounded) timeAirWhileSliding += Time.deltaTime;
-            else             timeAirWhileSliding = 0f;
-        }
+            timeAirWhileSliding = isGrounded ? 0f : timeAirWhileSliding + Time.deltaTime;
 
         // Head height
-        if (head != null)
+        if (head)
         {
             float targetY = (isCrouching || isSliding) ? headCrouchY : headStandY;
-            Vector3 hp = head.localPosition;
-            hp.y = Mathf.Lerp(hp.y, targetY, 12f * Time.deltaTime);
+            Vector3 hp = head.localPosition; hp.y = Mathf.Lerp(hp.y, targetY, 12f * Time.deltaTime);
             head.localPosition = hp;
         }
+
+        // reset saltos extra
+        if (!wasGrounded && isGrounded)
+            jumpsLeft = extraJumps;
+
+        wasGrounded = isGrounded;
+
+        // decaimiento no-cap
+        if (suppressAirCapUntil > 0f && Time.time >= suppressAirCapUntil) suppressAirCapUntil = 0f;
     }
 
     void FixedUpdate()
     {
-        if (rb == null || rb.isKinematic)
-            return;
+        if (rb == null || rb.isKinematic) return;
 
-        if (slideExitLockTimer > 0f) slideExitLockTimer -= Time.fixedDeltaTime;
+        if (slideExitLockTimer > 0f) slideExitLockTimer   -= Time.fixedDeltaTime;
         if (airControlBlockTimer > 0f) airControlBlockTimer -= Time.fixedDeltaTime;
+        if (steerBoostTimer > 0f) steerBoostTimer -= Time.fixedDeltaTime;
 
-        // ---- AUDIO: actualizar velocidad horizontal para modular el sonido ----
         if (slideNoise)
         {
-            Vector3 horizVel = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
-            slideNoise.speed = horizVel.magnitude;   // m/s
+            Vector3 hv0 = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+            slideNoise.speed = hv0.magnitude;
         }
 
-        // Slide-Jump: buffer + coyote + requisito "empezó en slope" (si está activado)
+        // Resolver slide-jump (buffer + coyote)
         if (slideJumpQueued)
         {
-            bool bufferAlive = Time.time <= slideJumpQueuedUntil;
+            bool bufferAlive      = Time.time <= slideJumpQueuedUntil;
             bool canBecauseGround = isGrounded;
             bool canBecauseCoyote = timeAirWhileSliding <= slideJumpCoyote;
-
-            bool slopeOk = true;
-            if (slideJumpOnlyOnSlope)
-                slopeOk = slideOnSlopeAtStart; // <-- requisito simplificado: empezó en slope
+            bool slopeOk          = !slideJumpOnlyOnSlope || slideOnSlopeAtStart;
 
             if (bufferAlive && (canBecauseGround || canBecauseCoyote) && slopeOk)
             {
@@ -271,102 +297,115 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
                 {
                     isSliding = false;
                     StopCrouch();
-                    // --- AUDIO: apagar ---
                     if (slideNoise) slideNoise.sliding = false;
                 }
 
-                // Dirección: SIEMPRE horizontal hacia donde mirás (sin apuntar al piso)
-                Vector3 fwd = head
-                    ? Vector3.ProjectOnPlane(head.forward, Vector3.up)
-                    : Vector3.ProjectOnPlane(transform.forward, Vector3.up);
-                if (fwd.sqrMagnitude < 1e-6f) fwd = transform.forward;
-                fwd.Normalize();
-
-                // Boost horizontal + componente vertical por ángulo configurado
+                Vector3 fwd = GetCamPlanarForwardSafe();
                 Vector3 planarVel = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
-                float baseHoriz = planarVel.magnitude;
-                float desiredHoriz = Mathf.Clamp(baseHoriz + slideJumpHorizBonus, slideJumpHorizFloor, slideJumpHorizMax);
-                float angRad = Mathf.Clamp(slideJumpAngleDeg, 5f, 60f) * Mathf.Deg2Rad;
+                float baseForward = Mathf.Max(0f, Vector3.Dot(planarVel, fwd)); // solo componente hacia adelante
+
+                float desiredHoriz= Mathf.Clamp(baseForward + slideJumpHorizBonus, slideJumpHorizFloor, slideJumpHorizMax);
+                float angRad      = Mathf.Clamp(slideJumpAngleDeg, 5f, 60f) * Mathf.Deg2Rad;
                 float desiredVert = Mathf.Min(desiredHoriz * Mathf.Tan(angRad), slideJumpVertMax);
 
-                rb.velocity = fwd * desiredHoriz + Vector3.up * desiredVert;
+                // seteo directa la comp. horiz en dirCam y elevo vertical (sin matar ascenso mayor)
+                float vyKeep = Mathf.Max(0f, rb.velocity.y);
+                rb.velocity = fwd * desiredHoriz + Vector3.up * vyKeep;
+                rb.AddForce(Vector3.up * desiredVert, ForceMode.VelocityChange);
 
                 airControlBlockTimer = afterSlideJumpNoControlTime;
+                suppressAirCapUntil = Mathf.Max(suppressAirCapUntil, Time.time + djNoCapTime);
                 return;
             }
-            else if (!bufferAlive)
-            {
-                slideJumpQueued = false;
-            }
+            else if (!bufferAlive) slideJumpQueued = false;
         }
 
+        // SLIDE
         if (isSliding)
         {
             rb.AddForce(Vector3.down * slideExtraGravity, ForceMode.Acceleration);
 
-            // normal / direcciones sobre superficie
             Vector3 n = (lastGroundNormal == Vector3.zero) ? Vector3.up : lastGroundNormal.normalized;
             Vector3 downSlope = Vector3.ProjectOnPlane(Vector3.down, n);
             if (downSlope.sqrMagnitude > 1e-6f) downSlope.Normalize();
 
-            Vector3 rightSlope;
-            if (downSlope == Vector3.zero)
-                rightSlope = head ? Vector3.ProjectOnPlane(head.right, Vector3.up).normalized : Vector3.right;
-            else
-                rightSlope = Vector3.Cross(n, downSlope).normalized;
+            Vector3 fwdTmp = slideForwardCurrent;
+            if (Mathf.Abs(inputXRaw) > 0.01f)
+            {
+                float sign = Mathf.Sign(inputXRaw);
+                float mag  = Mathf.Pow(Mathf.Abs(inputXRaw), slideSteerYawExponent);
+                float yaw  = slideSteerYawDegPerSec * mag * sign * Time.fixedDeltaTime;
+                fwdTmp = Quaternion.AngleAxis(yaw, n) * fwdTmp;
+            }
+            fwdTmp = Vector3.ProjectOnPlane(fwdTmp, n).normalized;
+
+            slideForwardCurrent = (alignToFallLine && downSlope != Vector3.zero)
+                ? Vector3.Slerp(fwdTmp, downSlope, fallLineAlignStrength * Time.fixedDeltaTime).normalized
+                : fwdTmp;
+
+            Vector3 forwardOnSlope = slideForwardCurrent;
+            Vector3 rightOnSlope   = (downSlope != Vector3.zero)
+                ? Vector3.Cross(n, slideForwardCurrent).normalized
+                : (head ? Vector3.ProjectOnPlane(head.right, Vector3.up).normalized : Vector3.right);
 
             if (slopeAssist > 0f && downSlope != Vector3.zero)
                 rb.AddForce(downSlope * slopeAssist, ForceMode.Acceleration);
 
-            // cortar slide si piso suelo no-slope (salvo lock tras pedir salto)
+            bool crouchHeld = Input.GetKey(crouchKey);
             if (isGrounded && !lastGroundIsSlope && slideExitLockTimer <= 0f)
             {
                 isSliding = false;
                 StopCrouch();
-                // --- AUDIO: apagar ---
                 if (slideNoise) slideNoise.sliding = false;
                 return;
             }
 
-            // --- VELOCIDAD CONSTANTE + STRAFE ---
-            Vector3 planarVel = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
-
-            Vector3 dirNow = (planarVel.sqrMagnitude > 0.01f) ? planarVel.normalized : slideStartDirPlanar;
-            Vector3 baseDir = Vector3.Slerp(dirNow, slideStartDirPlanar, keepHeading).normalized;
-
-            if (slideViewTurnAssist > 0f && head)
-            {
-                Vector3 camPlanar = Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized;
-                baseDir = Vector3.Slerp(baseDir, camPlanar, slideViewTurnAssist * Time.fixedDeltaTime * 10f).normalized;
-            }
-
-            Vector3 forwardOnSlope = baseDir;
-            Vector3 rightOnSlope   = rightSlope;
+            Vector3 planarVelNow = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
 
             float raw = Mathf.Clamp(inputXRaw, -1f, 1f);
-            float sign = Mathf.Sign(raw);
-            float mag = Mathf.Pow(Mathf.Abs(raw), slideStrafeExponent);
-            float lateral = sign * mag * slideStrafeInfluence;
+            float signInput = Mathf.Sign(raw);
+            float magInput  = Mathf.Pow(Mathf.Abs(raw), slideStrafeExponent);
+            float inputLateral = signInput * magInput * slideStrafeInfluence;
 
-            Vector3 biasedDir = (forwardOnSlope + rightOnSlope * lateral);
-            if (biasedDir.sqrMagnitude > 1e-6f) biasedDir.Normalize();
-            else biasedDir = forwardOnSlope;
+            if (slideLateralEdgeGuard > 0f)
+            {
+                Vector3 sideDir = (inputLateral >= 0f ? rightOnSlope : -rightOnSlope);
+                Vector3 origin = col.bounds.center; origin.y = col.bounds.min.y + 0.05f;
 
-            Vector3 targetPlanar = biasedDir * slideConstantSpeed;
-            planarVel = Vector3.MoveTowards(planarVel, targetPlanar, slideAccelToConst * Time.fixedDeltaTime);
+                Vector3 probeSide = origin + sideDir * edgeProbeDistance;
+                bool haySueloCostado = Physics.Raycast(probeSide, Vector3.down, out _, edgeProbeDown, groundMask, QueryTriggerInteraction.Ignore);
 
-            rb.velocity = new Vector3(planarVel.x, rb.velocity.y, planarVel.z);
-            // --- /VELOCIDAD CONSTANTE + STRAFE ---
+                if (debugRays)
+                {
+                    Debug.DrawLine(origin, probeSide, Color.yellow, Time.fixedDeltaTime);
+                    Debug.DrawRay(probeSide, Vector3.down * edgeProbeDown, haySueloCostado ? Color.green : Color.red);
+                }
 
-            bool crouchHeld = Input.GetKey(crouchKey);
-            float planarSpeed = planarVel.magnitude;
+                if (!haySueloCostado) inputLateral *= slideLateralEdgeGuard;
+            }
+
+            float vFwd = Vector3.Dot(planarVelNow, forwardOnSlope);
+            float vLat = Vector3.Dot(planarVelNow, rightOnSlope);
+
+            float targetFwd = slideConstantSpeed;
+            float effLatAccel = slideLateralAccel * ((steerBoostTimer > 0f) ? steerBoostLateralAccelMult : 1f);
+            float effLatMax   = slideMaxLateralSpeed * ((steerBoostTimer > 0f) ? steerBoostMaxLatMult : 1f);
+            float targetLat   = Mathf.Clamp(inputLateral * slideMaxLateralSpeed, -effLatMax, effLatMax);
+
+            vFwd = Mathf.MoveTowards(vFwd, targetFwd, slideAccelToConst * Time.fixedDeltaTime);
+            vLat = Mathf.MoveTowards(vLat, targetLat,  effLatAccel       * Time.fixedDeltaTime);
+
+            Vector3 newPlanar = forwardOnSlope * vFwd + rightOnSlope * vLat;
+            rb.velocity = new Vector3(newPlanar.x, rb.velocity.y, newPlanar.z);
+
+            float planarSpeed = new Vector3(rb.velocity.x, 0f, rb.velocity.z).magnitude;
+            bool needsHold = !(autoSlideIgnoreCrouchToSustain && currentStartMode == SlideStartMode.AutoSlope);
             if (slideExitLockTimer <= 0f)
             {
-                if (!crouchHeld || planarSpeed < slideMinSpeedExit || timeAirWhileSliding > slideGroundCoyote)
+                if ((needsHold && !crouchHeld) || planarSpeed < slideMinSpeedExit || timeAirWhileSliding > slideGroundCoyote)
                 {
                     isSliding = false;
                     StopCrouch();
-                    // --- AUDIO: apagar ---
                     if (slideNoise) slideNoise.sliding = false;
                 }
             }
@@ -378,18 +417,22 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
         {
             if (airControlBlockTimer <= 0f)
             {
-                Vector3 planarForward = head ? Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized : Vector3.forward;
+                Vector3 planarForward = GetCamPlanarForwardSafe();
                 Vector3 planarRight = head ? Vector3.ProjectOnPlane(head.right, Vector3.up).normalized : Vector3.right;
                 Vector3 wish = (planarRight * Input.GetAxisRaw("Horizontal") + planarForward * Input.GetAxisRaw("Vertical")).normalized;
                 if (wish.sqrMagnitude > 0.01f)
                     rb.AddForce(wish * airControlAccel, ForceMode.Acceleration);
             }
 
-            Vector3 hv = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
-            if (hv.magnitude > airMaxHorizontalSpeed)
+            bool suppress = suppressAirSpeedCap || (suppressAirCapUntil > Time.time);
+            if (!suppress)
             {
-                hv = hv.normalized * airMaxHorizontalSpeed;
-                rb.velocity = new Vector3(hv.x, rb.velocity.y, hv.z);
+                Vector3 hv = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+                if (hv.magnitude > airMaxHorizontalSpeed)
+                {
+                    hv = hv.normalized * airMaxHorizontalSpeed;
+                    rb.velocity = new Vector3(hv.x, rb.velocity.y, hv.z);
+                }
             }
             return;
         }
@@ -403,47 +446,112 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
         rb.velocity = vel;
     }
 
-    // Helpers
-    void QueueSlideJump(Vector3 cameraPlanarForward)
+    // ==== Helpers ====
+
+    void DoDoubleJumpWithAngle()
+    {
+        // 1) Dirección SIEMPRE = forward planar de la cámara (con fallback robusto).
+        Vector3 dirCam = GetCamPlanarForwardSafe();
+
+        // 2) Carry actual y PROYECCIÓN hacia adelante (solo componente útil).
+        Vector3 hv = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+        float carryForward = Mathf.Max(0f, Vector3.Dot(hv, dirCam));
+
+        // 3) Objetivo horizontal: mínimo + bonus si hace falta.
+        float horiz = Mathf.Max(carryForward, djMinHorizSpeed);
+        if (carryForward < djMinHorizSpeed * 0.75f) horiz += djForwardBonus;
+
+        // 4) Objetivo vertical según ángulo, con techo.
+        float angRad = Mathf.Clamp(djAngleDeg, 5f, 60f) * Mathf.Deg2Rad;
+        float vertByAngle = Mathf.Min(horiz * Mathf.Tan(angRad), djVertMax);
+
+        // Asegura al menos la fuerza base del doble salto si el ángulo da muy poco.
+        float vert = Mathf.Max(vertByAngle, doubleJumpForce);
+
+        // Mantener ascenso si ya ibas subiendo (no lo reduzco).
+        float vyKeep = Mathf.Max(0f, rb.velocity.y);
+
+        // 5) Aplicar: set horizontal exacto en dirCam + conservar ascenso + sumar vertical del ángulo.
+        rb.velocity = dirCam * horiz + Vector3.up * vyKeep;
+        rb.AddForce(Vector3.up * vert, ForceMode.VelocityChange);
+
+        // 6) Ventana sin cap para no cortar el impulso recién generado.
+        suppressAirCapUntil = Mathf.Max(suppressAirCapUntil, Time.time + djNoCapTime);
+    }
+
+    void StartSlideNow(Vector3 planarForward, SlideStartMode mode)
+    {
+        StartCrouch();
+        isSliding = true;
+        timeAirWhileSliding = 0f;
+        slideOnSlopeAtStart = true;
+        currentStartMode = mode;
+
+        Vector3 n = (lastGroundNormal == Vector3.zero) ? Vector3.up : lastGroundNormal.normalized;
+        Vector3 fallLine = Vector3.ProjectOnPlane(Vector3.down, n);
+        if (fallLine.sqrMagnitude < 1e-6f) fallLine = planarForward;
+        fallLine.Normalize();
+
+        slideForwardCurrent = fallLine;
+        slideStartDirPlanar = fallLine;
+
+        Vector3 pv = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+        Vector3 right = Vector3.Cross(n, fallLine).normalized;
+        float vFwd = Vector3.Dot(pv, fallLine);
+        float vLat = Vector3.Dot(pv, right);
+
+        vLat *= (1f - Mathf.Clamp01(lateralDampOnEnter));
+
+        if (unifyEntrySpeed)
+        { if (entryClampExact) vFwd = slideConstantSpeed; else vFwd = Mathf.Min(vFwd, slideConstantSpeed); }
+        else
+        {
+            vFwd = Mathf.Max(vFwd, slideStartMinForwardSpeed);
+            if (autoStartSnapToConstSpeed && (mode == SlideStartMode.AutoSlope || mode == SlideStartMode.LandingHeld))
+                vFwd = Mathf.Max(vFwd, slideConstantSpeed);
+        }
+
+        Vector3 newPlanar = fallLine * vFwd + right * vLat;
+        rb.velocity = new Vector3(newPlanar.x, rb.velocity.y, newPlanar.z);
+
+        steerBoostTimer = steerBoostDuration;
+
+        if (slideNoise) slideNoise.sliding = true;
+    }
+
+    void QueueSlideJump()
     {
         slideJumpQueued = true;
         slideJumpQueuedUntil = Time.time + slideJumpBuffer;
         slideExitLockTimer = slideJumpExitLock;
+    }
 
-        // respaldo (ya no define la dirección final)
-        queuedJumpForward = head
-            ? Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized
-            : Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
+    Vector3 GetCamPlanarForwardSafe()
+    {
+        Vector3 fwd = head ? Vector3.ProjectOnPlane(head.forward, Vector3.up)
+                           : Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+        if (fwd.sqrMagnitude < 1e-6f)
+        {
+            // fallback: si la cámara apunta demasiado abajo, usa el último forward bueno o el vel planar
+            Vector3 hv = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+            fwd = (hv.sqrMagnitude > 0.01f) ? hv.normalized : lastGoodPlanarForward;
+        }
+        else
+        {
+            lastGoodPlanarForward = fwd.normalized;
+        }
+        return fwd.normalized;
     }
 
     bool GroundInfo(out RaycastHit hit)
     {
         Vector3 origin = col.bounds.center;
         float rayDist = col.bounds.extents.y + 0.06f;
-        bool ok = Physics.Raycast(
-            origin,
-            Vector3.down,
-            out hit,
-            rayDist,
-            groundMask,
-            QueryTriggerInteraction.Ignore
-        );
-        if (debugRays)
-            Debug.DrawRay(origin, Vector3.down * rayDist, ok ? Color.green : Color.red);
+        bool ok = Physics.Raycast(origin, Vector3.down, out hit, rayDist, groundMask, QueryTriggerInteraction.Ignore);
+        if (debugRays) Debug.DrawRay(origin, Vector3.down * rayDist, ok ? Color.green : Color.red);
         return ok;
     }
 
-    void StartCrouch()
-    {
-        isCrouching = true;
-        col.height = crouchHeight;
-        col.center = new Vector3(0f, crouchHeight * 0.5f, 0f);
-    }
-
-    void StopCrouch()
-    {
-        isCrouching = false;
-        col.height = standHeight;
-        col.center = new Vector3(0f, standHeight * 0.5f, 0f);
-    }
+    void StartCrouch(){ isCrouching = true; col.height = crouchHeight; col.center = new Vector3(0f, crouchHeight * 0.5f, 0f); }
+    void StopCrouch(){ isCrouching = false; col.height = standHeight; col.center = new Vector3(0f, standHeight * 0.5f, 0f); }
 }

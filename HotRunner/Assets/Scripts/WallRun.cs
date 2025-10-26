@@ -31,16 +31,16 @@ public class WallRun : MonoBehaviour
     [Header("Wall Jump")]
     public KeyCode jumpKey = KeyCode.Space;
     public float wallJumpUpForce = 7f;
-    public float wallJumpSideForce = 8f;
-    public float wallJumpCooldownTime = 0.15f;
+    public float wallJumpSideForce = 7.5f;
+
+    [Header("Transfer (cruzar al frente)")]
+    public float wallJumpTangentialMin = 10f;
 
     [Header("Exit & Cooldowns")]
     public float detachImpulse = 1.5f;
-    public float reattachCooldown = 0.12f;
-    public float sameWallCooldown = 0.40f;
-
-    [Range(0.80f, 0.99f)]
-    public float sameWallDotThreshold = 0.92f;
+    public float reattachCooldown = 0.18f;
+    public float sameWallCooldown = 0.45f;
+    [Range(0.80f, 0.999f)] public float sameWallDotThreshold = 0.92f;
 
     [Header("Camera Tilt")]
     public float camTilt = 12f;
@@ -50,8 +50,7 @@ public class WallRun : MonoBehaviour
     CapsuleCollider col;
 
     bool isWallRunning;
-    bool leftWall,
-        rightWall;
+    bool leftWall, rightWall;
     Vector3 wallNormal;
     float runTimer;
     float camTiltTarget;
@@ -61,12 +60,17 @@ public class WallRun : MonoBehaviour
     float sameWallBlockTimer = 0f;
     Vector3 lastWallNormal = Vector3.zero;
 
+    // Exponer estado para Player
+    public bool IsRunning => isWallRunning;
+
+    // cache de forward robusto (para transfers)
+    Vector3 lastGoodPlanarForward = Vector3.forward;
+
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
         col = GetComponent<CapsuleCollider>();
-        if (head == null)
-            head = transform;
+        if (head == null) head = transform;
         if (cameraFollow == null && Camera.main)
             cameraFollow = Camera.main.GetComponent<CameraFollow>();
     }
@@ -78,22 +82,12 @@ public class WallRun : MonoBehaviour
         bool forwardHeld = Input.GetAxisRaw("Vertical") > 0.1f;
         bool grounded = IsGrounded();
 
-        if (wallJumpCooldown > 0f)
-            wallJumpCooldown -= Time.deltaTime;
-        if (reattachTimer > 0f)
-            reattachTimer -= Time.deltaTime;
-        if (sameWallBlockTimer > 0f)
-            sameWallBlockTimer -= Time.deltaTime;
+        if (wallJumpCooldown > 0f) wallJumpCooldown -= Time.deltaTime;
+        if (reattachTimer   > 0f) reattachTimer   -= Time.deltaTime;
+        if (sameWallBlockTimer > 0f) sameWallBlockTimer -= Time.deltaTime;
 
-        if (
-            !isWallRunning
-            && !grounded
-            && forwardHeld
-            && (leftWall || rightWall)
-            && wallJumpCooldown <= 0f
-            && reattachTimer <= 0f
-            && !IsBlockedBySameWall()
-        )
+        if (!isWallRunning && !grounded && forwardHeld && (leftWall || rightWall)
+            && wallJumpCooldown <= 0f && reattachTimer <= 0f && !IsBlockedBySameWall())
         {
             StartWallRun();
         }
@@ -112,32 +106,23 @@ public class WallRun : MonoBehaviour
         }
 
         if (cameraFollow != null)
-            cameraFollow.roll = Mathf.Lerp(
-                cameraFollow.roll,
-                camTiltTarget,
-                camTiltSpeed * Time.deltaTime
-            );
+            cameraFollow.roll = Mathf.Lerp(cameraFollow.roll, camTiltTarget, camTiltSpeed * Time.deltaTime);
     }
 
     void FixedUpdate()
     {
-        if (!isWallRunning)
-            return;
+        if (!isWallRunning) return;
 
         Vector3 along = Vector3.Cross(wallNormal, Vector3.up);
-        Vector3 planarForward = Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized;
-        if (Vector3.Dot(along, planarForward) < 0f)
-            along = -along;
+        Vector3 planarForward = GetCamPlanarForwardSafe();
+        if (Vector3.Dot(along, planarForward) < 0f) along = -along;
 
         Vector3 planarVel = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
         Vector3 alongComp = Vector3.Project(planarVel, along);
         float alongSpeed = alongComp.magnitude;
 
-        float throttle = Mathf.Clamp01(
-            (maxWallPlanarSpeed - alongSpeed) / Mathf.Max(0.001f, maxWallPlanarSpeed)
-        );
-        if (throttle > 0f)
-            rb.AddForce(along * (wallRunForce * throttle), ForceMode.Acceleration);
+        float throttle = Mathf.Clamp01((maxWallPlanarSpeed - alongSpeed) / Mathf.Max(0.001f, maxWallPlanarSpeed));
+        if (throttle > 0f) rb.AddForce(along * (wallRunForce * throttle), ForceMode.Acceleration);
 
         rb.AddForce(-wallNormal * wallStickForce, ForceMode.Acceleration);
 
@@ -152,11 +137,7 @@ public class WallRun : MonoBehaviour
         if (holdHeight)
         {
             rb.AddForce(-Physics.gravity, ForceMode.Acceleration);
-            float newY = Mathf.MoveTowards(
-                rb.velocity.y,
-                0f,
-                verticalDamping * Time.fixedDeltaTime
-            );
+            float newY = Mathf.MoveTowards(rb.velocity.y, 0f, verticalDamping * Time.fixedDeltaTime);
             rb.velocity = new Vector3(rb.velocity.x, newY, rb.velocity.z);
         }
     }
@@ -167,72 +148,52 @@ public class WallRun : MonoBehaviour
         wallNormal = Vector3.zero;
 
         Vector3 origin = col.bounds.center;
-        Vector3 leftDir = -Vector3.ProjectOnPlane(head.right, Vector3.up).normalized;
-        Vector3 rightDir = Vector3.ProjectOnPlane(head.right, Vector3.up).normalized;
+        Vector3 leftDir  = -Vector3.ProjectOnPlane(head.right, Vector3.up).normalized;
+        Vector3 rightDir =  Vector3.ProjectOnPlane(head.right, Vector3.up).normalized;
 
-        if (
-            Physics.Raycast(
-                origin,
-                leftDir,
-                out RaycastHit lHit,
-                wallCheckDistance,
-                wallMask,
-                QueryTriggerInteraction.Ignore
-            )
-        )
+        if (Physics.Raycast(origin, leftDir, out RaycastHit lHit, wallCheckDistance, wallMask, QueryTriggerInteraction.Ignore))
         {
-            leftWall = true;
-            wallNormal = lHit.normal;
+            if (!(IsSameAsLast(lHit.normal) && sameWallBlockTimer > 0f))
+            {
+                leftWall = true;
+                wallNormal = lHit.normal;
+            }
         }
 
-        if (
-            Physics.Raycast(
-                origin,
-                rightDir,
-                out RaycastHit rHit,
-                wallCheckDistance,
-                wallMask,
-                QueryTriggerInteraction.Ignore
-            )
-        )
+        if (Physics.Raycast(origin, rightDir, out RaycastHit rHit, wallCheckDistance, wallMask, QueryTriggerInteraction.Ignore))
         {
-            rightWall = true;
-            if (
-                !leftWall
-                || Vector3.Dot(rHit.normal, head.forward) > Vector3.Dot(wallNormal, head.forward)
-            )
-                wallNormal = rHit.normal;
+            if (!(IsSameAsLast(rHit.normal) && sameWallBlockTimer > 0f))
+            {
+                rightWall = true;
+                if (!leftWall || Vector3.Dot(rHit.normal, head.forward) > Vector3.Dot(wallNormal, head.forward))
+                    wallNormal = rHit.normal;
+            }
         }
 
-        Debug.DrawRay(origin, leftDir * wallCheckDistance, leftWall ? Color.green : Color.gray);
+        Debug.DrawRay(origin, leftDir  * wallCheckDistance, leftWall  ? Color.green : Color.gray);
         Debug.DrawRay(origin, rightDir * wallCheckDistance, rightWall ? Color.green : Color.gray);
-        if (wallNormal != Vector3.zero)
-            Debug.DrawRay(origin, wallNormal, Color.cyan);
+        if (wallNormal != Vector3.zero) Debug.DrawRay(origin, wallNormal, Color.cyan);
 
         camTiltTarget = isWallRunning ? (rightWall ? camTilt : (leftWall ? -camTilt : 0f)) : 0f;
+    }
+
+    bool IsSameAsLast(Vector3 n)
+    {
+        if (lastWallNormal == Vector3.zero) return false;
+        float dot = Vector3.Dot(lastWallNormal.normalized, n.normalized);
+        return dot >= sameWallDotThreshold;
     }
 
     bool IsGrounded()
     {
         Vector3 origin = col.bounds.center;
         float rayDist = col.bounds.extents.y + 0.06f;
-        return Physics.Raycast(
-            origin,
-            Vector3.down,
-            rayDist,
-            groundMask,
-            QueryTriggerInteraction.Ignore
-        );
+        return Physics.Raycast(origin, Vector3.down, rayDist, groundMask, QueryTriggerInteraction.Ignore);
     }
 
     bool IsBlockedBySameWall()
     {
-        if (
-            sameWallBlockTimer <= 0f
-            || lastWallNormal == Vector3.zero
-            || wallNormal == Vector3.zero
-        )
-            return false;
+        if (sameWallBlockTimer <= 0f || lastWallNormal == Vector3.zero || wallNormal == Vector3.zero) return false;
         float dot = Vector3.Dot(lastWallNormal.normalized, wallNormal.normalized);
         return dot >= sameWallDotThreshold;
     }
@@ -263,16 +224,56 @@ public class WallRun : MonoBehaviour
 
     void DoWallJump()
     {
-        Vector3 jumpDir = wallNormal.normalized * wallJumpSideForce + Vector3.up * wallJumpUpForce;
+        Vector3 up = Vector3.up;
+        Vector3 n  = wallNormal.normalized;
 
-        rb.velocity = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
-        rb.AddForce(jumpDir, ForceMode.VelocityChange);
+        // Tangente del corredor (perpendicular a la normal y al up)
+        Vector3 tangent = Vector3.Cross(n, up);
+        if (tangent.sqrMagnitude < 1e-6f) tangent = transform.forward;
+        tangent.Normalize();
 
-        wallJumpCooldown = wallJumpCooldownTime;
-        lastWallNormal = wallNormal;
+        // Elegir sentido de la tangente según cámara (para ir hacia la pared de enfrente)
+        Vector3 camPlanar = GetCamPlanarForwardSafe();
+        if (Vector3.Dot(tangent, camPlanar) < 0f) tangent = -tangent;
+
+        // Garantizar mínimo tangencial para no ir vertical
+        Vector3 planarVel = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+        float alongNow = Vector3.Dot(planarVel, tangent);
+        float targetAlong = Mathf.Max(Mathf.Abs(alongNow), wallJumpTangentialMin);
+        Vector3 keepPlanar = tangent * targetAlong;
+
+        // Empuje alejándote de la pared + up
+        Vector3 awayPlanar = n * wallJumpSideForce;
+
+        // Componer nueva velocidad (no matar ascenso)
+        float vy = Mathf.Max(0f, rb.velocity.y);
+        Vector3 newPlanar = keepPlanar + awayPlanar;
+
+        rb.velocity = new Vector3(newPlanar.x, vy, newPlanar.z);
+        rb.AddForce(up * wallJumpUpForce, ForceMode.VelocityChange);
+
+        // Cooldowns
+        wallJumpCooldown = 0.15f;
+        lastWallNormal = n;
         sameWallBlockTimer = Mathf.Max(sameWallBlockTimer, sameWallCooldown);
-        reattachTimer = Mathf.Max(reattachTimer, reattachCooldown);
+        reattachTimer     = Mathf.Max(reattachTimer, reattachCooldown);
 
         StopWallRun();
+    }
+
+    Vector3 GetCamPlanarForwardSafe()
+    {
+        Vector3 fwd = head ? Vector3.ProjectOnPlane(head.forward, Vector3.up)
+                           : Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+        if (fwd.sqrMagnitude < 1e-6f)
+        {
+            Vector3 hv = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+            fwd = (hv.sqrMagnitude > 0.01f) ? hv.normalized : lastGoodPlanarForward;
+        }
+        else
+        {
+            lastGoodPlanarForward = fwd.normalized;
+        }
+        return fwd.normalized;
     }
 }

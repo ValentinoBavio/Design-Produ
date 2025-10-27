@@ -14,6 +14,10 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
     public KeyCode sprintKey = KeyCode.LeftShift;
     public KeyCode crouchKey = KeyCode.LeftControl; // tap = slide, hold = crouch
 
+    [Header("Audio")]
+    public AudioSource audioSource;
+    public AudioClip doubleJumpClip;
+
     [Header("Speeds")]
     public float walkSpeed = 6f;
     public float sprintSpeed = 9f;
@@ -477,6 +481,11 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
 
         // 6) Ventana sin cap para no cortar el impulso recién generado.
         suppressAirCapUntil = Mathf.Max(suppressAirCapUntil, Time.time + djNoCapTime);
+
+        if (audioSource != null && doubleJumpClip != null)
+        {
+            audioSource.PlayOneShot(doubleJumpClip);
+        }
     }
 
     void StartSlideNow(Vector3 planarForward, SlideStartMode mode)

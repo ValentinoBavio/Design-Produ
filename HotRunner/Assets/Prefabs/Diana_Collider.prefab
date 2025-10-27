@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 1002912531640531653}
   - component: {fileID: 1933144906776633873}
   - component: {fileID: 892076043167122384}
-  m_Layer: 0
+  m_Layer: 7
   m_Name: Diana_Collider
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -26,9 +26,9 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2346176543157406042}
   serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 120.02, y: 9.381212, z: 13.42}
-  m_LocalScale: {x: 3.2121, y: 2.0343301, z: 3.2121}
+  m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 744504958218319489}
@@ -79,7 +79,7 @@ GameObject:
   - component: {fileID: 5302023725581916904}
   - component: {fileID: 8103834919421184429}
   - component: {fileID: 547551474248649925}
-  m_Layer: 0
+  m_Layer: 7
   m_Name: Diana
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -95,8 +95,8 @@ Transform:
   m_GameObject: {fileID: 2438851680403505407}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalPosition: {x: 0.2038, y: 0.1839, z: 0.5024}
+  m_LocalScale: {x: 1.4076022, y: 1.3679, z: 0.004784}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1002912531640531653}
@@ -129,7 +129,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: afcbafcd30a3cd642815989a4adf3277, type: 2}
+  - {fileID: 2100000, guid: 5969907421f408b429cbca30df1d47ce, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0

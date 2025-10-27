@@ -8,12 +8,7 @@ using TMPro;
 public class GrappleGun : MonoBehaviour
 {
     [Header("Input")]
-    public KeyCode grappleKey = KeyCode.E;       // disparo/retarget principal
-    public KeyCode retargetKey = KeyCode.Mouse1; // retarget alterno (click)
-
-    [Header("Cut behavior")]
-    [Tooltip("Al soltar Mouse1 se corta si la sesión actual fue iniciada con Mouse1.")]
-    public bool stopOnRetargetRelease = true;
+    public KeyCode grappleKey = KeyCode.E; // mantener para sostener; soltar = cortar
 
     [Header("Salida visual (origen del cast)")]
     [Tooltip("Avance hacia adelante del origen del tiro (desde la cámara).")]
@@ -22,58 +17,41 @@ public class GrappleGun : MonoBehaviour
     public float fireRightOffset = 0.25f;
 
     [Header("Refs")]
-    public Transform firePoint; // normalmente la Main Camera
-    public LineRenderer lineRenderer; // Use World Space = ON
-    public LayerMask grappleMask = ~0;
+    public Transform firePoint;            // normalmente la Main Camera
+    public LineRenderer lineRenderer;      // Use World Space = ON
+    public LayerMask grappleMask = ~0;     // capas válidas de anclaje
 
     // ---------- UI: Prompt debajo de la mira (opcional) ----------
     [Header("Prompt UI (opcional)")]
-    [Tooltip("Texto TMP que aparece (estilo 'computadora'). Dejalo vacío para no usar.")]
     public TextMeshProUGUI promptText;
-    [Tooltip("Velocidad de fade in/out del prompt.")]
     public float promptFadeSpeed = 8f;
-    [Tooltip("Mostrar el prompt solo en Idle (recomendado).")]
     public bool showPromptOnlyWhenIdle = true;
-    [Tooltip("Bajar el prompt a pantalla baja (no afecta si no asignás promptText).")]
     public bool promptStickToBottom = false;
-    [Tooltip("Altura desde el borde inferior si promptStickToBottom está activo.")]
     public float promptBottomY = 120f;
 
-    float promptTargetAlpha;   // 0 = oculto, 1 = visible
-    Color promptBaseColor;     // para interpolar alfa
-    bool promptVisible;        // estado lógico de visibilidad
+    float promptTargetAlpha;   // 0..1
+    Color promptBaseColor;
+    bool promptVisible;
 
-    // ---------- NUEVO: UI de RETÍCULA (ícono + tecla) ----------
+    // ---------- UI: Retícula / HUD ----------
     [Header("Retícula (mira)")]
-    [Tooltip("Ícono cerca de la mira que aparece si el objetivo es grapleable.")]
     public Image reticleIcon;
-    [Tooltip("Color del ícono cuando HAY objetivo y NO hay cooldown.")]
     public Color reticleReadyColor = Color.white;
-    [Tooltip("Color cuando NO hay objetivo válido.")]
     public Color reticleNoTargetColor = new Color(1f, 1f, 1f, 0.25f);
-    [Tooltip("Color cuando HAY objetivo pero estás en cooldown.")]
     public Color reticleCooldownColor = new Color(0.5f, 0.5f, 0.5f, 0.7f);
-
-    [Tooltip("Texto con la tecla ('E') junto a la retícula (opcional).")]
     public TextMeshProUGUI reticleKeyHint;
-    [Tooltip("Glifo mostrado (por defecto 'E').")]
     public string reticleKeyGlyph = "E";
 
-    // ---------- NUEVO: HUD principal del Grapple ----------
     [Header("HUD (ícono del Grapple)")]
-    [Tooltip("Ícono fijo en la UI que refleja cooldown (asigná un Image en el HUD).")]
     public Image grappleHudIcon;
-    [Tooltip("Color del ícono cuando está listo.")]
     public Color hudReadyColor = Color.white;
-    [Tooltip("Color del ícono cuando está en cooldown.")]
     public Color hudCooldownColor = new Color(0.45f, 0.45f, 0.45f, 1f);
-    [Tooltip("Usar Image.type=Filled para mostrar progreso de cooldown (Relleno).")]
     public bool hudUseFillCooldown = true;
 
     // ---------- Cooldown ----------
     [Header("Cooldown")]
     public bool useCooldown = true;
-    [Tooltip("Segundos de cooldown al cortar el grapple (o fallar un cast).")]
+    [Tooltip("Segundos de cooldown al cortar el grapple o fallar un cast.")]
     public float grappleCooldown = 0.85f;
 
     float nextReadyTime = 0f;
@@ -81,52 +59,47 @@ public class GrappleGun : MonoBehaviour
     float CooldownRemaining => useCooldown ? Mathf.Max(0f, nextReadyTime - Time.time) : 0f;
     float Cooldown01 => useCooldown ? Mathf.InverseLerp(grappleCooldown, 0f, CooldownRemaining) : 0f;
 
-    //Integración con LedgeMantle (sigue soportado, pero podés dejarlo vacío)
-    [Header("LedgeMantle (opcional)")]
-    public LedgeMantle ledgeMantle;
-    public bool enableMantleWhileAttached = false; // <- por defecto desactivado según tu último comentario
-    public bool requireHoldGrappleForMantle = true;
-    public float mantleTriggerDistance = 3.0f;
-    public float mantleMinVerticalDelta = 0.3f;
-    public float mantleMaxVerticalDelta = 7.0f;
-    public bool useFixedTopBand = true;
-    public float topBandMeters = 1.0f;
-    [Range(0.05f, 0.95f)] public float topBandFraction = 0.5f;
-    public bool useAnchorRootBounds = true;
-
+    // ---------- Alcance / Cast ----------
     [Header("Reach / Cast")]
     public float maxGrappleDistance = 90f;
     public float ropeShootSpeed = 200f;
     public float castRadius = 0.10f;
     public float minAnchorDistance = 1.0f;
 
+    // ---------- Joint (tracción base) ----------
     [Header("Joint (tracción base)")]
     public float spring = 150f;
     public float damper = 12f;
     public float massScale = 4f;
     [Range(0.2f, 1f)] public float startSlackFactor = 0.9f;
 
+    // ---------- Reel ----------
     [Header("Reel (encoger cuerda)")]
     public bool autoReelOnAttach = true;
     public float reelSpeed = 42f;
     [Range(0.0f, 1.0f)] public float reelSmooth = 0.45f;
 
-    [Header("Pull Assist (fluidez extra)")]
+    // ---------- Assist ----------
+    [Header("Pull Assist")]
     public float pullAssistAccel = 70f;
     public float pullAssistMaxHorizSpeed = 55f;
 
-    [Header("Hang / Rope Lock (colgado)")]
+    // ---------- Hang / Lock ----------
+    [Header("Hang / Rope Lock")]
+    [Tooltip("El lock sólo funciona si mantenés E; al soltar se corta igualmente.")]
     public bool lockWhenClose = true;
     public float hangLockDistance = 1.2f;
     public float hangSpringBoost = 1.6f;
     public float hangDamperBoost = 2.0f;
 
+    // ---------- Anti-obstrucción ----------
     [Header("Anti-obstrucción")]
     public bool breakIfObstructed = true;
     public float obstructCheckRadius = 0.15f;
     public float obstructIgnoreNear = 0.6f;
     public float obstructIgnoreNearAnchor = 0.5f;
 
+    // ---------- Anti-swing / gravedad escalada ----------
     [Header("Anti-swing")]
     public bool antiSwing = true;
     public float tangentialDamping = 28f;
@@ -134,6 +107,7 @@ public class GrappleGun : MonoBehaviour
     [Range(0f, 1.2f)] public float gravityScaleWhileAttached = 0.6f;
     public float swingReelBoost = 1.2f;
 
+    // ---------- Robustez re-enganche ----------
     [Header("Robustez re-enganche")]
     public float minReanchorSeparation = 0.7f;
     public bool ignoreAnchorDuringCast = true;
@@ -146,19 +120,20 @@ public class GrappleGun : MonoBehaviour
     [Header("Obstruction tweak")]
     public float obstructionGraceAfterRetarget = 0.25f;
 
+    // ---------- Audio ----------
     [Header("Audio")]
     public AudioSource sfxOneShot;
-    public AudioClip sfxShoot;       // disparo
-    public AudioClip sfxAttach;      // enganche
-    public AudioClip sfxFail;        // fallo
-    public AudioClip sfxCooldownDenied; // NUEVO: sonido si estás en cooldown
-    public AudioClip sfxGrapplePull; // cuando empezás a tirar de la cuerda
+    public AudioClip sfxShoot;
+    public AudioClip sfxAttach;
+    public AudioClip sfxFail;
+    public AudioClip sfxCooldownDenied;
+    public AudioClip sfxGrapplePull;
     public AudioSource sfxPullSource;
 
     [Header("Debug")]
     public bool debugLogs = false;
 
-    // runtime
+    // --------- runtime ---------
     Rigidbody rb;
     SpringJoint joint;
     Vector3 grapplePoint;
@@ -166,14 +141,11 @@ public class GrappleGun : MonoBehaviour
     enum State { Idle, Casting, Attached }
     State state = State.Idle;
 
-    enum Driver { None, Key, Mouse }
-    Driver currentDriver = Driver.None;
-
     Vector3 ropeTip, ropeDir;
     float ropeTraveled;
 
     float targetMaxDistance;
-    bool reeling;       // mantener E en Attached
+    bool reeling;
 
     bool isHanging;
     float baseSpring, baseDamper;
@@ -194,17 +166,16 @@ public class GrappleGun : MonoBehaviour
 
     bool spacePressedBuffered;
 
-    // Audio/session flags
-    bool castInProgress;          // hay un cast en curso
-    bool attachedThisCast;        // este cast ya enganchó
-    bool pullPlayedThisAttach;    // ya sonó el one-shot de 'grappeling' en este enganche
-    bool prevReeling;             // reeling del frame anterior (para flanco)
+    // flags de sesión/audio
+    bool castInProgress;
+    bool attachedThisCast;
+    bool pullPlayedThisAttach;
+    bool prevReeling;
 
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
-        if (firePoint == null && Camera.main)
-            firePoint = Camera.main.transform;
+        if (firePoint == null && Camera.main) firePoint = Camera.main.transform;
 
         if (lineRenderer != null)
         {
@@ -217,7 +188,7 @@ public class GrappleGun : MonoBehaviour
         baseSpring = spring;
         baseDamper = damper;
 
-        // Prompt UI init
+        // Prompt
         if (promptText)
         {
             promptBaseColor = promptText.color;
@@ -254,15 +225,19 @@ public class GrappleGun : MonoBehaviour
         bool keyUp    = Input.GetKeyUp(grappleKey);
         bool keyHold  = Input.GetKey(grappleKey);
 
-        bool mouseDown = Input.GetKeyDown(retargetKey);
-        bool mouseUp   = Input.GetKeyUp(retargetKey);
-
-        // --- UI de mira (prompt + retícula + HUD) ---
-        bool aimValid = UpdateAimUI();
+        // UI
+        UpdateAimUI();
         TickPromptFade();
         UpdateHudIcon();
 
-        // START / RETARGET
+        // HOLD-TO-SUSTAIN: si se suelta E en cualquier estado, cortar
+        if (keyUp)
+        {
+            StopGrapple(); // siempre corta al soltar
+            return;
+        }
+
+        // INICIO: sólo si está listo y E se presiona
         if (keyDown)
         {
             if (!Ready)
@@ -271,38 +246,21 @@ public class GrappleGun : MonoBehaviour
             }
             else if (state == State.Idle)
             {
-                if (singleRopeHardCut) StartCoroutine(BeginAfterHardCut(Driver.Key));
-                else                   BeginCast(Driver.Key);
+                if (singleRopeHardCut) StartCoroutine(BeginAfterHardCut());
+                else                   BeginCast();
             }
             else
             {
-                if (singleRopeHardCut) StartCoroutine(RetargetAfterHardCut(Driver.Key));
-                else                   RetargetCast(Driver.Key);
+                // Si ya hay sesión (Casting/Attached) y apretaste de nuevo, reseteo cast
+                if (singleRopeHardCut) StartCoroutine(RetargetAfterHardCut());
+                else                   RetargetCast();
             }
         }
 
-        // Mouse1 NO inicia desde Idle; sólo retarget si hay sesión activa
-        if (mouseDown && state != State.Idle)
-        {
-            if (!Ready)
-            {
-                PlayOneShotSafe(sfxCooldownDenied, 1f);
-            }
-            else
-            {
-                if (singleRopeHardCut) StartCoroutine(RetargetAfterHardCut(Driver.Mouse));
-                else                   RetargetCast(Driver.Mouse);
-            }
-        }
-
-        // STOP por soltar el botón que inició la sesión
-        if (keyUp && currentDriver == Driver.Key) StopGrapple();
-        if (mouseUp && currentDriver == Driver.Mouse && stopOnRetargetRelease) StopGrapple();
-
-        // Reel solo con E
+        // Reel sólo si sostenés E mientras estás Attached
         reeling = (state == State.Attached) && keyHold;
 
-        // --- One-shot 'grappeling' en flanco de subida de reeling ---
+        // one-shot de “grappeling” al empezar a reeler
         if (state == State.Attached && castInProgress && attachedThisCast)
         {
             if (!pullPlayedThisAttach && !prevReeling && reeling)
@@ -310,13 +268,27 @@ public class GrappleGun : MonoBehaviour
                 PlayPullStartIfNeeded();
                 pullPlayedThisAttach = true;
             }
-            if (prevReeling && !reeling) StopPullNow();
+            if (prevReeling && !reeling)
+            {
+                StopPullNow();
+            }
         }
         prevReeling = reeling;
     }
 
     void FixedUpdate()
     {
+        // Si E NO se mantiene: cortar instantáneamente también desde Fixed (por si el Update no alcanzó)
+        if (!Input.GetKey(grappleKey))
+        {
+            if (state != State.Idle)
+            {
+                StopGrapple();
+            }
+            spacePressedBuffered = false;
+            return;
+        }
+
         switch (state)
         {
             case State.Casting:  UpdateCasting();  break;
@@ -329,18 +301,14 @@ public class GrappleGun : MonoBehaviour
     Vector3 ComputeOrigin()
     {
         if (!firePoint) return transform.position;
-        return firePoint.position
-             + firePoint.right   * fireRightOffset
-             + firePoint.forward * castStartOffset;
+        return firePoint.position + firePoint.right * fireRightOffset + firePoint.forward * castStartOffset;
     }
-
     Vector3 ComputeForward() => (firePoint ? firePoint.forward : transform.forward);
 
-    void BeginCast(Driver driver)
+    void BeginCast()
     {
         if (!firePoint) return;
 
-        currentDriver = driver;
         state = State.Casting;
 
         castInProgress = true;
@@ -369,31 +337,28 @@ public class GrappleGun : MonoBehaviour
 
         noObstructionUntil = Time.time + Mathf.Max(0, obstructionGraceAfterRetarget);
 
-        if (debugLogs) Debug.Log($"[GrappleGun] BeginCast() by {driver}");
+        if (debugLogs) Debug.Log("[GrappleGun] BeginCast()");
     }
 
-    IEnumerator BeginAfterHardCut(Driver d)
+    IEnumerator BeginAfterHardCut()
     {
         HardStop();
         int frames = Mathf.Max(1, hardCutDelayFrames);
         for (int i = 0; i < frames; i++) yield return new WaitForFixedUpdate();
-        BeginCast(d);
+        BeginCast();
     }
 
-    IEnumerator RetargetAfterHardCut(Driver d)
+    IEnumerator RetargetAfterHardCut()
     {
         HardStop();
         int frames = Mathf.Max(1, hardCutDelayFrames);
         for (int i = 0; i < frames; i++) yield return new WaitForFixedUpdate();
-        BeginCast(d);
+        BeginCast();
     }
 
-    void RetargetCast(Driver driver)
+    void RetargetCast()
     {
-        if (debugLogs) Debug.Log($"[GrappleGun] RetargetCast() by {driver}");
-
-        currentDriver = driver;
-
+        if (debugLogs) Debug.Log("[GrappleGun] RetargetCast()");
         StashLastAnchor();
 
         if (joint)
@@ -429,6 +394,7 @@ public class GrappleGun : MonoBehaviour
 
     void UpdateCasting()
     {
+        // si dejaste de sostener E durante el cast, se corta en FixedUpdate
         float step = ropeShootSpeed * Time.fixedDeltaTime;
         Vector3 prevTip = ropeTip;
         Vector3 nextTip = ropeTip + ropeDir * step;
@@ -451,7 +417,7 @@ public class GrappleGun : MonoBehaviour
 
         if (ropeTraveled >= maxGrappleDistance)
         {
-            // no impact -> FAIL + cooldown
+            // fin de cast sin impacto -> FAIL + cooldown
             StopGrapple(true);
         }
     }
@@ -533,51 +499,18 @@ public class GrappleGun : MonoBehaviour
 
     void UpdateAttached()
     {
-        // E + Space -> mantle (opcional)
-        if (enableMantleWhileAttached && ledgeMantle && !ledgeMantle.isMantling)
+        // HOLD-TO-SUSTAIN: seguridad extra (si por cualquier razón no estás manteniendo E, cortar)
+        if (!Input.GetKey(grappleKey))
         {
-            bool keyHold = Input.GetKey(grappleKey);
-            bool holdOK = !requireHoldGrappleForMantle || keyHold;
-
-            if (holdOK && spacePressedBuffered)
-            {
-                float distNow = Vector3.Distance(transform.position, grapplePoint);
-                float verticalDelta = attachHit.point.y - transform.position.y;
-
-                bool withinDist = distNow <= mantleTriggerDistance;
-                bool withinVertical = verticalDelta >= mantleMinVerticalDelta && verticalDelta <= mantleMaxVerticalDelta;
-                bool topBandOK = AnchorIsInTopBand(attachHit);
-
-                if (withinDist && withinVertical && topBandOK)
-                {
-                    bool ok = ledgeMantle.TryMantleFromGrapple(attachHit.point, attachHit.normal);
-                    if (ok)
-                    {
-                        StopGrapple();
-                        return;
-                    }
-                }
-            }
+            StopGrapple();
+            return;
         }
 
-        // REEL/assist/swing
         Vector3 toHook = grapplePoint - transform.position;
         float distNow2 = toHook.magnitude;
         Vector3 dir = toHook.sqrMagnitude > 1e-8f ? toHook / distNow2 : Vector3.up;
 
-        Vector3 v = rb.velocity;
-        float vRad = Vector3.Dot(v, dir);
-        Vector3 vTan = v - dir * vRad;
-        float tan = vTan.magnitude;
-
-        float reelDt = reelSpeed * Time.fixedDeltaTime;
-        float extra = swingReelBoost * tan * Time.fixedDeltaTime;
-        float newTarget = Mathf.Max(hangLockDistance, targetMaxDistance - reelDt - extra);
-
-        targetMaxDistance = Mathf.Lerp(targetMaxDistance, newTarget, 1f - Mathf.Exp(-reelSmooth * 60f * Time.fixedDeltaTime));
-        joint.maxDistance = Mathf.Min(joint.maxDistance, targetMaxDistance);
-        joint.minDistance = Mathf.Min(joint.minDistance, Mathf.Max(hangLockDistance * 0.25f, targetMaxDistance * 0.25f));
-
+        // Assist
         rb.AddForce(dir * pullAssistAccel, ForceMode.Acceleration);
 
         Vector3 hv = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
@@ -587,9 +520,35 @@ public class GrappleGun : MonoBehaviour
             rb.velocity = new Vector3(hv.x, rb.velocity.y, hv.z);
         }
 
+        // Reel
+        float tan = 0f;
+        {
+            Vector3 v = rb.velocity;
+            float vRad = Vector3.Dot(v, dir);
+            Vector3 vTan = v - dir * vRad;
+            tan = vTan.magnitude;
+        }
+
+        float reelDt = reelSpeed * Time.fixedDeltaTime;
+        float extra = swingReelBoost * tan * Time.fixedDeltaTime;
+        float newTarget = Mathf.Max(hangLockDistance, targetMaxDistance - reelDt - extra);
+
+        targetMaxDistance = Mathf.Lerp(targetMaxDistance, newTarget, 1f - Mathf.Exp(-reelSmooth * 60f * Time.fixedDeltaTime));
+        if (joint)
+        {
+            joint.maxDistance = Mathf.Min(joint.maxDistance, targetMaxDistance);
+            joint.minDistance = Mathf.Min(joint.minDistance, Mathf.Max(hangLockDistance * 0.25f, targetMaxDistance * 0.25f));
+        }
+
+        // Anti-swing + gravedad reducida
         if (antiSwing && tan > 1e-4f)
         {
+            Vector3 v = rb.velocity;
+            float vRad = Vector3.Dot(v, dir);
+            Vector3 vTan = v - dir * vRad;
+
             rb.AddForce(-vTan.normalized * Mathf.Min(tan, maxTangentialSpeed) * tangentialDamping, ForceMode.Acceleration);
+
             if (gravityScaleWhileAttached < 1f)
             {
                 float k = 1f - gravityScaleWhileAttached;
@@ -597,7 +556,7 @@ public class GrappleGun : MonoBehaviour
             }
         }
 
-        // Colgado
+        // Lock cerca del ancla — SOLO si mantenés E
         if (lockWhenClose && distNow2 <= hangLockDistance + 0.02f && Input.GetKey(grappleKey))
         {
             if (!isHanging)
@@ -618,7 +577,7 @@ public class GrappleGun : MonoBehaviour
             RestoreJointTune();
         }
 
-        // Anti-obstrucción (SOLO capas anclables) + tiempo de gracia
+        // Anti-obstrucción
         if (breakIfObstructed && Time.time >= noObstructionUntil)
         {
             Vector3 from = ComputeOrigin();
@@ -651,7 +610,7 @@ public class GrappleGun : MonoBehaviour
 
     void RestoreJointTune()
     {
-        if (joint == null) return;
+        if (!joint) return;
         joint.spring = baseSpring;
         joint.damper = baseDamper;
     }
@@ -668,17 +627,14 @@ public class GrappleGun : MonoBehaviour
     // ================== STOP ==================
     public void StopGrapple(bool playFail = false)
     {
-        if (debugLogs) Debug.Log("[GrappleGun] StopGrapple()");
-
-        // FAIL: solo si veníamos casteando y no pegamos
+        // FAIL: sólo si veníamos casteando y no pegamos
         if (playFail && castInProgress && !attachedThisCast)
             PlayOneShotSafe(sfxFail, 1f);
 
-        // Cooldown al cortar (si corresponde)
-        if (useCooldown)
-            nextReadyTime = Time.time + grappleCooldown;
+        // Cooldown al cortar
+        if (useCooldown) nextReadyTime = Time.time + grappleCooldown;
 
-        // Guarda ancla actual para la ventana anti-rebote
+        // Stash para ventana anti-rebote
         StashLastAnchor();
 
         if (joint) Destroy(joint);
@@ -696,7 +652,6 @@ public class GrappleGun : MonoBehaviour
         StopPullNow();
 
         state = State.Idle;
-        currentDriver = Driver.None;
         isHanging = false;
         reeling = false;
 
@@ -709,7 +664,6 @@ public class GrappleGun : MonoBehaviour
         prevReeling = false;
     }
 
-    // Corte duro
     void HardStop()
     {
         if (joint) Destroy(joint);
@@ -727,7 +681,6 @@ public class GrappleGun : MonoBehaviour
         StopPullNow();
 
         state = State.Idle;
-        currentDriver = Driver.None;
         isHanging = false;
         reeling = false;
 
@@ -759,7 +712,6 @@ public class GrappleGun : MonoBehaviour
             if (selfCols[i] == c) return true;
         return false;
     }
-
     bool IsAnchorCollider(Collider c)
     {
         if (c == null) return false;
@@ -772,30 +724,11 @@ public class GrappleGun : MonoBehaviour
         }
         return false;
     }
-
     bool IsOldAnchorCollider(Collider c)
     {
         if (c == null || lastAnchorRoot == null) return false;
         Transform t = c.transform;
         return (t == lastAnchorRoot || t.IsChildOf(lastAnchorRoot) || lastAnchorRoot.IsChildOf(t));
-    }
-
-    bool AnchorIsInTopBand(RaycastHit hit)
-    {
-        if (hit.collider == null) return false;
-
-        Bounds b = useAnchorRootBounds ? GetHierarchyBounds(hit.collider.transform.root)
-                                       : hit.collider.bounds;
-
-        float topY = b.max.y;
-        float bottomY = b.min.y;
-        float height = Mathf.Max(0.0001f, topY - bottomY);
-
-        float band = useFixedTopBand ? Mathf.Min(topBandMeters, height)
-                                     : height * Mathf.Clamp01(topBandFraction);
-        float thresholdY = topY - band;
-
-        return hit.point.y >= thresholdY;
     }
 
     Bounds GetHierarchyBounds(Transform root)
@@ -826,25 +759,44 @@ public class GrappleGun : MonoBehaviour
     void OnDisable() => HardStop();
 
     // ==================== UI LOGIC ====================
-    // Devuelve si hay objetivo grapleable válido
+    void SetupHudIcon()
+    {
+        if (!grappleHudIcon) return;
+        if (hudUseFillCooldown)
+        {
+            grappleHudIcon.fillMethod = Image.FillMethod.Radial360;
+            grappleHudIcon.type = Image.Type.Filled;
+            grappleHudIcon.fillAmount = 1f;
+        }
+        grappleHudIcon.color = Ready ? hudReadyColor : hudCooldownColor;
+    }
+
+    void UpdateHudIcon()
+    {
+        if (!grappleHudIcon) return;
+
+        if (useCooldown)
+        {
+            if (hudUseFillCooldown)
+                grappleHudIcon.fillAmount = Ready ? 1f : (1f - Cooldown01);
+
+            grappleHudIcon.color = Ready ? hudReadyColor : hudCooldownColor;
+        }
+        else
+        {
+            grappleHudIcon.fillAmount = 1f;
+            grappleHudIcon.color = hudReadyColor;
+        }
+    }
+
+    // Devuelve si hay objetivo válido y actualiza retícula/prompt
     bool UpdateAimUI()
     {
-        // Prompt “computadora”
         if (showPromptOnlyWhenIdle && state != State.Idle)
         {
             SetPromptVisible(false);
         }
-        else
-        {
-            if (!promptText) { /* nada */ }
-            else
-            {
-                // Visibilidad del prompt no depende de objetivo; lo controla el hint de mira
-                // (seguimos usando SetPromptVisible desde más abajo si querés)
-            }
-        }
 
-        // Retícula y key-hint
         bool aimValid = false;
         bool readyNow = Ready;
 
@@ -858,15 +810,14 @@ public class GrappleGun : MonoBehaviour
         Vector3 origin = ComputeOrigin();
         Vector3 dir = ComputeForward().normalized;
 
-        bool hasHit = Physics.SphereCast(origin, castRadius, dir, out RaycastHit hit, maxGrappleDistance, grappleMask, QueryTriggerInteraction.Ignore);
+        bool hasHit = Physics.SphereCast(
+            origin, castRadius, dir,
+            out RaycastHit hit, maxGrappleDistance, grappleMask, QueryTriggerInteraction.Ignore
+        );
 
         if (hasHit)
         {
-            if (IsOwnCollider(hit.collider) || (ignoreAnchorDuringCast && IsAnchorCollider(hit.collider)))
-            {
-                aimValid = false;
-            }
-            else
+            if (!IsOwnCollider(hit.collider) && !(ignoreAnchorDuringCast && IsAnchorCollider(hit.collider)))
             {
                 float d = Vector3.Distance(transform.position, hit.point);
                 aimValid = (d >= minAnchorDistance);
@@ -875,27 +826,18 @@ public class GrappleGun : MonoBehaviour
 
         if (reticleIcon)
         {
-            if (!aimValid)
-            {
-                SetReticle(reticleNoTargetColor, false);
-            }
-            else
-            {
-                SetReticle(readyNow ? reticleReadyColor : reticleCooldownColor, true);
-            }
+            if (!aimValid) SetReticle(reticleNoTargetColor, false);
+            else           SetReticle(readyNow ? reticleReadyColor : reticleCooldownColor, true);
         }
 
         if (reticleKeyHint)
         {
             reticleKeyHint.text = reticleKeyGlyph;
-            reticleKeyHint.gameObject.SetActive(aimValid && readyNow);
+            reticleKeyHint.gameObject.SetActive(aimValid && readyNow && state == State.Idle);
         }
 
-        // El prompt “computadora” solo lo muestro si querés mantenerlo:
         if (promptText)
-        {
             SetPromptVisible(aimValid && (state == State.Idle));
-        }
 
         return aimValid;
     }
@@ -926,39 +868,6 @@ public class GrappleGun : MonoBehaviour
         if (!promptText) return;
         var col = promptText.color;
         promptText.color = new Color(col.r, col.g, col.b, a);
-    }
-
-    void SetupHudIcon()
-    {
-        if (!grappleHudIcon) return;
-        // Si querés fill radial, asegurate que el Image sea type=Filled (Radial360) en el Inspector
-        if (hudUseFillCooldown)
-        {
-            grappleHudIcon.fillMethod = Image.FillMethod.Radial360;
-            grappleHudIcon.type = Image.Type.Filled;
-            grappleHudIcon.fillAmount = 1f;
-        }
-        grappleHudIcon.color = Ready ? hudReadyColor : hudCooldownColor;
-    }
-
-    void UpdateHudIcon()
-    {
-        if (!grappleHudIcon) return;
-
-        if (useCooldown)
-        {
-            if (hudUseFillCooldown)
-            {
-                // 1 = listo, 0 = recién empezó el CD
-                grappleHudIcon.fillAmount = Ready ? 1f : (1f - Cooldown01);
-            }
-            grappleHudIcon.color = Ready ? hudReadyColor : hudCooldownColor;
-        }
-        else
-        {
-            grappleHudIcon.fillAmount = 1f;
-            grappleHudIcon.color = hudReadyColor;
-        }
     }
 
     // ==================== AUDIO HELPERS ====================

@@ -2,63 +2,75 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+#if UNITY_2019_3_OR_NEWER
+using UnityEngine.VFX;
+#endif
 
+[DisallowMultipleComponent]
 public class Gun : MonoBehaviour
 {
     [Header("Input")]
-    public KeyCode aimKey  = KeyCode.Mouse1; // mantener para equipar/desenfundar
-    public KeyCode fireKey = KeyCode.Mouse0; // presionar mientras se mantiene aimKey
+    public KeyCode aimKey  = KeyCode.Mouse1;
+    public KeyCode fireKey = KeyCode.Mouse0;
 
     [Header("Refs (overlay)")]
-    [Tooltip("Nodo raíz del arma bajo la GunCamera (no la Cámara principal).")]
-    public Transform weaponRoot; 
-    [Tooltip("Posición local guardada (fundado).")]
-    public Vector3 holsterLocalPos = new Vector3(0.2f, -0.35f, -0.5f);
+    public Transform weaponRoot;
+    public Vector3 holsterLocalPos   = new Vector3(0.2f, -0.35f, -0.5f);
     public Vector3 holsterLocalEuler = new Vector3(12f, 25f, 0f);
-    [Tooltip("Posición local apuntando (en pantalla).")]
-    public Vector3 aimLocalPos = new Vector3(0.1f, -0.12f, 0.2f);
-    public Vector3 aimLocalEuler = new Vector3(0f, 0f, 0f);
-    [Tooltip("Suavizado de transición fundado <-> apuntando.")]
-    public float equipLerp = 12f;
+    public Vector3 aimLocalPos       = new Vector3(0.1f, -0.12f, 0.2f);
+    public Vector3 aimLocalEuler     = new Vector3(0f, 0f, 0f);
+    public float   equipLerp         = 12f;
 
     [Header("Disparo (proyectil)")]
-    [Tooltip("Punto de salida del proyectil (boca del arma).")]
-    public Transform muzzle;
-    [Tooltip("Prefab de proyectil con Rigidbody (el TrailRenderer lo agregamos/ajustamos por código).")]
-    public Rigidbody bulletPrefab;
-    public float bulletSpeed = 120f;
-    public float bulletLife = 3f;
+    public Transform  muzzle;
+    public Rigidbody  bulletPrefab;       // opcional
+    public float      bulletSpeed   = 120f;
+    public float      bulletLife    = 3f;
 
     [Header("Muzzle VFX")]
-    [Tooltip("Prefab del VFX (ParticleSystem o GameObject) para la boca del arma.")]
     public GameObject muzzleVfxPrefab;
-    [Tooltip("Si es true, el VFX quedará como hijo del muzzle (útil para armas en primera persona).")]
-    public bool parentMuzzleVfx = true;
-    [Tooltip("Tiempo de vida forzado si el prefab no tiene ParticleSystem (0 = auto).")]
-    public float muzzleVfxLife = 0.6f;
+    public bool   parentMuzzleVfx   = true;
+    public float  muzzleVfxLife     = 0.6f;
+
+    [Header("Muzzle VFX - Avanzado")]
+    public Camera gunCamera;
+    public bool   muzzleVfxWorldSpace = false; // LOCAL por defecto
+    public bool   muzzleVfxTestAtOrigin = false;
+
+    [Header("Aim / Hitscan")]
+    public float     maxRange = 300f;
+    public LayerMask hitMask = ~0;
 
     [Header("Tracer (Trail)")]
-    [Tooltip("Material para el Trail (unlit recomendado).")]
-    public Material tracerMaterial;
-    [Tooltip("Duración visible del rastro (seg).")]
+    public Material tracerMaterial;              // NO usar el mismo que el fogonazo
     public float tracerTime = 0.18f;
-    [Tooltip("Distancia mínima entre vértices del trail (más chico = más suave).")]
     public float tracerMinVertexDistance = 0.04f;
-    [Tooltip("Curva de ancho (0..1). 0=>inicio del trail, 1=>cola del trail.")]
     public AnimationCurve tracerWidth = AnimationCurve.EaseInOut(0, 0.16f, 1, 0.0f);
-    [Tooltip("Gradiente de color/alfa para el tracer.")]
     public Gradient tracerColor;
+    public bool  forceImmediateTracer = true;
+    public float tracerVisualSpeed    = 300f;
+    public int   tracerCornerVerts    = 8;
+    public int   tracerCapVerts       = 8;
+
+    [Tooltip("Renderizar el tracer en una capa del mundo (ej. Default) para que lo vea la Main Camera.")]
+    public bool tracerOnWorldLayer = true;
+    [Tooltip("Índice de Layer para el tracer (0 = Default).")]
+    public int tracerLayer = 0;
+
+    [Header("Impacto (opcional)")]
+    public GameObject impactVfxPrefab;
+    public float      impactVfxLife = 1.0f;
 
     [Header("Retroceso (arma)")]
-    public Vector3 recoilKickPos = new Vector3(0f, 0.02f, -0.08f); // desplazamiento local
-    public Vector3 recoilKickEuler = new Vector3(-6f, 0f, 0f);      // rotación local (pitch)
-    public float recoilUpTime = 0.04f;
-    public float recoilRelaxTime = 0.22f;
+    public Vector3 recoilKickPos   = new Vector3(0f, 0.02f, -0.08f);
+    public Vector3 recoilKickEuler = new Vector3(-6f, 0f, 0f);
+    public float   recoilUpTime    = 0.04f;
+    public float   recoilRelaxTime = 0.22f;
 
     [Header("Enfriamiento")]
-    public float shotCooldown = 5f;   // segundos
-    public Image  hudIcon;            // ícono en UI
-    public Color  hudReadyColor = Color.white;
+    public float  shotCooldown = 5f;
+    public Image  hudIcon;
+    public Color  hudReadyColor    = Color.white;
     public Color  hudCooldownColor = new Color(0.4f, 0.4f, 0.4f, 1f);
     public bool   hudUseFillCooldown = true;
 
@@ -67,36 +79,26 @@ public class Gun : MonoBehaviour
     public AudioClip sfxDraw;
     public AudioClip sfxHolster;
     public AudioClip sfxFire;
-    public AudioClip sfxDenied; // click si está en cooldown
+    public AudioClip sfxDenied;
 
     [Header("Camera Kick")]
-    [Tooltip("Asigna la Main Camera con CameraKick.cs")]
     public CameraKick camKick;
     public Vector3 camKickOffset = new Vector3(0.02f, 0.012f, -0.12f);
-    public float camKickRollDeg = 2.2f;
-    public float camKickFovPunch = 2.4f;
-    public float camKickUpTime = 0.03f;
-    public float camKickRelax = 0.22f;
+    public float  camKickRollDeg  = 2.2f;
+    public float  camKickFovPunch = 2.4f;
+    public float  camKickUpTime   = 0.03f;
+    public float  camKickRelax    = 0.22f;
 
     // ---- runtime ----
-    Vector3 targetPos;
+    Vector3   targetPos;
     Quaternion targetRot;
-    Vector3 recoilVelPos;
-    Vector3 recoilVelEuler;
-    Vector3 curLocalEuler;
-
-    float nextShotReadyTime = 0f;
+    Vector3   recoilVelPos, recoilVelEuler, curLocalEuler;
+    float     nextShotReadyTime = 0f;
     bool Ready => Time.time >= nextShotReadyTime;
 
     void Reset()
     {
-        equipLerp = 12f;
-        bulletSpeed = 120f;
-        bulletLife = 3f;
-        shotCooldown = 5f;
-
-        // Tracer defaults (colores de “bala luminosa”)
-        if (tracerColor == null || tracerColor.colorKeys.Length == 0)
+        if (tracerColor == null || tracerColor.colorKeys == null || tracerColor.colorKeys.Length == 0)
         {
             var g = new Gradient();
             g.SetKeys(
@@ -120,23 +122,27 @@ public class Gun : MonoBehaviour
     void Awake()
     {
         if (!weaponRoot) weaponRoot = transform;
-
-        // arranca fundado
         weaponRoot.localPosition = holsterLocalPos;
         weaponRoot.localRotation = Quaternion.Euler(holsterLocalEuler);
         curLocalEuler = holsterLocalEuler;
         targetPos = holsterLocalPos;
         targetRot = Quaternion.Euler(holsterLocalEuler);
 
+        if (!gunCamera)
+        {
+            gunCamera = GetComponentInChildren<Camera>(true);
+            if (!gunCamera && Camera.main) gunCamera = Camera.main;
+        }
+
         SetupHudIcon();
     }
 
     void Update()
     {
-        bool aimHeld = Input.GetKey(aimKey);
+        bool aimHeld  = Input.GetKey(aimKey);
         bool fireDown = Input.GetKeyDown(fireKey);
 
-        // ----- Equip / Holster -----
+        // Equip/Holster
         if (aimHeld)
         {
             bool wasHolstered = targetPos == holsterLocalPos;
@@ -152,30 +158,20 @@ public class Gun : MonoBehaviour
             if (wasAiming && sfxHolster) PlayOnce(sfxHolster, 0.9f);
         }
 
-        // Lerp suave entre poses
-        weaponRoot.localPosition = Vector3.Lerp(
-            weaponRoot.localPosition, targetPos, equipLerp * Time.deltaTime);
-        weaponRoot.localRotation = Quaternion.Slerp(
-            weaponRoot.localRotation, targetRot, equipLerp * Time.deltaTime);
+        // Lerp entre poses
+        weaponRoot.localPosition = Vector3.Lerp(weaponRoot.localPosition, targetPos, equipLerp * Time.deltaTime);
+        weaponRoot.localRotation = Quaternion.Slerp(weaponRoot.localRotation, targetRot, equipLerp * Time.deltaTime);
 
-        // ----- Disparo -----
+        // Disparo
         if (aimHeld && fireDown)
         {
-            if (!Ready)
-            {
-                if (sfxDenied) PlayOnce(sfxDenied, 1f);
-            }
-            else
-            {
-                ShootNow();
-            }
+            if (!Ready) { if (sfxDenied) PlayOnce(sfxDenied, 1f); }
+            else ShootNow();
         }
 
-        // Retroceso (relajación suave después del disparo)
-        weaponRoot.localPosition = Vector3.SmoothDamp(
-            weaponRoot.localPosition, targetPos, ref recoilVelPos, recoilRelaxTime);
-        Vector3 eul = Vector3.SmoothDamp(
-            curLocalEuler, targetRot.eulerAngles, ref recoilVelEuler, recoilRelaxTime);
+        // Relajación de retroceso
+        weaponRoot.localPosition = Vector3.SmoothDamp(weaponRoot.localPosition, targetPos, ref recoilVelPos, recoilRelaxTime);
+        Vector3 eul = Vector3.SmoothDamp(curLocalEuler, targetRot.eulerAngles, ref recoilVelEuler, recoilRelaxTime);
         weaponRoot.localRotation = Quaternion.Euler(eul);
         curLocalEuler = eul;
 
@@ -184,70 +180,213 @@ public class Gun : MonoBehaviour
 
     void ShootNow()
     {
-        // MUZZLE VFX
-        if (muzzle && muzzleVfxPrefab)
+        // 1) Fogonazo
+        SpawnMuzzleVFX();
+
+        // 2) Aim al centro de pantalla
+        Vector3 rayOrigin, rayDir;
+        GetAimRay(out rayOrigin, out rayDir);
+
+        // 3) Raycast
+        Vector3 start = muzzle ? muzzle.position : transform.position;
+        Vector3 end   = start + rayDir * maxRange;
+        if (Physics.Raycast(rayOrigin, rayDir, out RaycastHit hit, maxRange, hitMask, QueryTriggerInteraction.Ignore))
         {
-            var vfx = Instantiate(muzzleVfxPrefab, muzzle.position, muzzle.rotation,
-                                  parentMuzzleVfx ? muzzle : null);
-            float life = muzzleVfxLife;
-            var ps = vfx.GetComponent<ParticleSystem>();
-            if (ps)
+            end = hit.point;
+            if (impactVfxPrefab)
             {
-                var m = ps.main;
-                life = Mathf.Max(life, m.duration + m.startLifetime.constantMax);
+                var ivfx = Instantiate(impactVfxPrefab, end, Quaternion.LookRotation(hit.normal));
+                SetLayerRecursively(ivfx, tracerOnWorldLayer ? tracerLayer : gameObject.layer);
+                Destroy(ivfx, Mathf.Max(0.05f, impactVfxLife));
             }
-            if (life <= 0f) life = 0.6f;
-            Destroy(vfx, life);
         }
 
-        // PROYECTIL + TRACER
-        if (muzzle && bulletPrefab)
+        // 4) Proyectil físico (opcional)
+        if (bulletPrefab && muzzle)
         {
-            var rb = Instantiate(bulletPrefab, muzzle.position, muzzle.rotation);
-            rb.velocity = muzzle.forward * bulletSpeed;
+            Vector3 dirToEnd = (end - muzzle.position).normalized;
+            var rb = Instantiate(bulletPrefab, muzzle.position, Quaternion.LookRotation(dirToEnd));
+            rb.velocity = dirToEnd * bulletSpeed;
+            Destroy(rb.gameObject, Mathf.Max(0.05f, bulletLife));
 
-            // Configurar/crear el tracer por código
-            var proj = rb.GetComponent<BulletProjectile>();
-            if (!proj) proj = rb.gameObject.AddComponent<BulletProjectile>();
-
-            proj.life = bulletLife;
-            proj.trailTime = tracerTime;
-            proj.minVertexDistance = tracerMinVertexDistance;
-            proj.trailWidth = tracerWidth;
-            proj.trailColor = tracerColor;
-            proj.trailMaterial = tracerMaterial; // opcional; si es null usa material por defecto
-
-            // (Si querés simular penetración/impacto, podés setear capas y OnCollisionEnter en BulletProjectile)
+            if (forceImmediateTracer) StartCoroutine(SpawnLineTracer(start, end));
+        }
+        else
+        {
+            // Hitscan + tracer visual
+            StartCoroutine(SpawnLineTracer(start, end));
         }
 
-        // Audio
+        // 5) Audio
         if (sfxFire) PlayOnce(sfxFire, 1f);
 
-        // Retroceso (arma)
+        // 6) Retroceso arma
         weaponRoot.localPosition += recoilKickPos;
         curLocalEuler += recoilKickEuler;
         CancelInvoke(nameof(ResetRecoilImmediate));
         Invoke(nameof(ResetRecoilImmediate), Mathf.Max(0.01f, recoilUpTime));
 
-        // Camera kick (potente)
+        // 7) Camera kick
         if (camKick)
-        {
-            camKick.KickAndShake(
-                camKickOffset,
-                camKickRollDeg,
-                camKickFovPunch,
-                camKickUpTime,
-                camKickRelax
-            );
-        }
+            camKick.KickAndShake(camKickOffset, camKickRollDeg, camKickFovPunch, camKickUpTime, camKickRelax);
 
-        // Cooldown
+        // 8) Cooldown
         nextShotReadyTime = Time.time + Mathf.Max(0.01f, shotCooldown);
     }
 
-    void ResetRecoilImmediate() { /* SmoothDamp hace el resto */ }
+    void ResetRecoilImmediate() { }
 
-    // -------- HUD cooldown --------
+    // === Tracer animado (TrailRenderer) ===
+    System.Collections.IEnumerator SpawnLineTracer(Vector3 start, Vector3 end)
+    {
+        GameObject go = new GameObject("TracerTemp");
+        go.transform.position = start;
+
+        // IMPORTANTE: capa del mundo para que lo vea la Main Camera
+        go.layer = tracerOnWorldLayer ? tracerLayer : gameObject.layer;
+
+        var tr = go.AddComponent<TrailRenderer>();
+        tr.time = Mathf.Max(0.02f, tracerTime);
+        tr.minVertexDistance = Mathf.Max(0.001f, tracerMinVertexDistance);
+        tr.widthCurve = tracerWidth;
+        tr.colorGradient = tracerColor;
+        tr.numCornerVertices = Mathf.Max(0, tracerCornerVerts);
+        tr.numCapVertices = Mathf.Max(0, tracerCapVerts);
+        tr.alignment = LineAlignment.View;
+
+        if (tracerMaterial)
+        {
+            tr.material = tracerMaterial; // Asegurate: shader Particles/Unlit (Additive/Alpha), ZWrite Off, Queue >= 3000
+        }
+        else
+        {
+            // Material por defecto seguro
+            var sh = Shader.Find("Particles/Standard Unlit");
+            tr.material = new Material(sh) { renderQueue = 3000 };
+            tr.material.SetFloat("_Mode", 2f); // Blend
+            tr.material.EnableKeyword("_ALPHABLEND_ON");
+        }
+
+        var rend = tr as Renderer;
+        if (rend != null)
+        {
+            rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            rend.receiveShadows = false;
+        }
+
+        // Avance del punto visual
+        float dist = Vector3.Distance(start, end);
+        float dur = Mathf.Max(0.02f, dist / Mathf.Max(1f, tracerVisualSpeed));
+        float t = 0f;
+        while (t < dur)
+        {
+            t += Time.deltaTime;
+            float k = Mathf.Clamp01(t / dur);
+            go.transform.position = Vector3.Lerp(start, end, k);
+            yield return null;
+        }
+        go.transform.position = end;
+
+        // Dejar disipar el trail
+        yield return new WaitForSeconds(tr.time);
+        Destroy(go);
+    }
+
+    // === Fogonazo / Muzzle ===
+    void SpawnMuzzleVFX()
+    {
+        if (!muzzleVfxPrefab) return;
+
+        if (muzzleVfxTestAtOrigin)
+        {
+            var test = Instantiate(muzzleVfxPrefab, Vector3.zero, Quaternion.identity, null);
+            SetLayerRecursively(test, gameObject.layer);
+            ForceParticlePlayable(test, muzzleVfxWorldSpace);
+            Destroy(test, Mathf.Max(0.1f, muzzleVfxLife));
+            return;
+        }
+
+        var parent = (parentMuzzleVfx && muzzle) ? muzzle : null;
+        var vfx = Instantiate(
+            muzzleVfxPrefab,
+            muzzle ? muzzle.position : transform.position,
+            muzzle ? muzzle.rotation : transform.rotation,
+            parent
+        );
+
+        if (parent != null)
+        {
+            vfx.transform.localPosition = Vector3.zero;
+            vfx.transform.localRotation = Quaternion.identity;
+            vfx.transform.localScale    = Vector3.one;
+        }
+
+        // El fogonazo puede quedar en la capa del arma (overlay)
+        SetLayerRecursively(vfx, gameObject.layer);
+
+        // Forzar espacio de simulación (LOCAL por defecto)
+        var allPs = vfx.GetComponentsInChildren<ParticleSystem>(true);
+        foreach (var ps in allPs)
+        {
+            var main = ps.main;
+            main.simulationSpace = muzzleVfxWorldSpace
+                ? ParticleSystemSimulationSpace.World
+                : ParticleSystemSimulationSpace.Local;
+            ps.Clear(true);
+            ps.Play(true);
+        }
+
+#if UNITY_2019_3_OR_NEWER
+        var vfxGraph = vfx.GetComponent<VisualEffect>();
+        if (vfxGraph) vfxGraph.Play();
+#endif
+
+        float life = Mathf.Max(0.05f, muzzleVfxLife);
+        foreach (var ps in allPs)
+        {
+            var main = ps.main;
+#if UNITY_2022_1_OR_NEWER
+            float lt = main.startLifetime.mode == ParticleSystemCurveMode.TwoConstants
+                       ? main.startLifetime.constantMax
+                       : main.startLifetime.constant;
+#else
+            float lt = main.startLifetime.constantMax;
+#endif
+            life = Mathf.Max(life, main.duration + lt);
+        }
+
+        if (gunCamera)
+        {
+            int layer = vfx.layer;
+            bool cameraSeesLayer = (gunCamera.cullingMask & (1 << layer)) != 0;
+            if (!cameraSeesLayer)
+                Debug.LogWarning($"[Gun] La cámara '{gunCamera.name}' no ve la Layer '{LayerMask.LayerToName(layer)}' del VFX. Ajustá el Culling Mask.");
+        }
+
+        Destroy(vfx, life);
+    }
+
+    // === Aim Ray ===
+    void GetAimRay(out Vector3 origin, out Vector3 dir)
+    {
+        if (gunCamera)
+        {
+            origin = gunCamera.transform.position;
+            dir = gunCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f)).direction;
+        }
+        else if (muzzle)
+        {
+            origin = muzzle.position;
+            dir    = muzzle.forward;
+        }
+        else
+        {
+            origin = transform.position;
+            dir    = transform.forward;
+        }
+    }
+
+    // === HUD ===
     void SetupHudIcon()
     {
         if (!hudIcon) return;
@@ -263,7 +402,6 @@ public class Gun : MonoBehaviour
     void UpdateHudIcon()
     {
         if (!hudIcon) return;
-
         if (Ready)
         {
             hudIcon.color = hudReadyColor;
@@ -280,10 +418,36 @@ public class Gun : MonoBehaviour
         }
     }
 
-    // -------- utility --------
+    // === Utils ===
     void PlayOnce(AudioClip clip, float vol)
     {
         if (!clip || sfxOneShot == null) return;
         sfxOneShot.PlayOneShot(clip, vol);
+    }
+
+    void SetLayerRecursively(GameObject go, int layer)
+    {
+        go.layer = layer;
+        foreach (Transform t in go.GetComponentsInChildren<Transform>(true))
+            t.gameObject.layer = layer;
+    }
+
+    void ForceParticlePlayable(GameObject root, bool worldSpace)
+    {
+        var psAll = root.GetComponentsInChildren<ParticleSystem>(true);
+        foreach (var ps in psAll)
+        {
+            var main = ps.main;
+            main.simulationSpace = worldSpace
+                ? ParticleSystemSimulationSpace.World
+                : ParticleSystemSimulationSpace.Local;
+            ps.Clear(true);
+            ps.Play(true);
+        }
+
+#if UNITY_2019_3_OR_NEWER
+        var vfxGraph = root.GetComponent<VisualEffect>();
+        if (vfxGraph) vfxGraph.Play();
+#endif
     }
 }

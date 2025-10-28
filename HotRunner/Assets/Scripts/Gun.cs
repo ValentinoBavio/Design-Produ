@@ -1,10 +1,12 @@
 using System.Collections;
 using System.Collections.Generic;
-using UnityEngine;
-using UnityEngine.UI;
 #if UNITY_2019_3_OR_NEWER
 using UnityEngine.VFX;
 #endif
+using System;
+using System.Reflection;
+using UnityEngine;
+using UnityEngine.UI;
 
 [DisallowMultipleComponent]
 public class Gun : MonoBehaviour
@@ -60,6 +62,13 @@ public class Gun : MonoBehaviour
     [Header("Impacto (opcional)")]
     public GameObject impactVfxPrefab;
     public float      impactVfxLife = 1.0f;
+
+    // >>> NUEVO: daño / destrucción seguro <<<
+    [Header("Daño / Destrucción")]
+    public float damage = 25f;
+    public bool  destroyTaggedBreakables = false;
+    public string breakableTag = "Breakable";
+    public float impactImpulse = 30f;
 
     [Header("Retroceso (arma)")]
     public Vector3 recoilKickPos   = new Vector3(0f, 0.02f, -0.08f);
@@ -193,27 +202,41 @@ public class Gun : MonoBehaviour
         if (Physics.Raycast(rayOrigin, rayDir, out RaycastHit hit, maxRange, hitMask, QueryTriggerInteraction.Ignore))
         {
             end = hit.point;
+
+            // Impact VFX
             if (impactVfxPrefab)
             {
                 var ivfx = Instantiate(impactVfxPrefab, end, Quaternion.LookRotation(hit.normal));
                 SetLayerRecursively(ivfx, tracerOnWorldLayer ? tracerLayer : gameObject.layer);
                 Destroy(ivfx, Mathf.Max(0.05f, impactVfxLife));
             }
+
+            // Impulso físico
+            if (hit.rigidbody)
+                hit.rigidbody.AddForceAtPosition(rayDir * impactImpulse, hit.point, ForceMode.Impulse);
+
+            // >>> APLICAR DAÑO (robusto, sin SendMessage y sin depender de sobrecargas) <<<
+            var hitGO = hit.rigidbody ? hit.rigidbody.gameObject : hit.collider.gameObject;
+            bool applied = TryApplyDamageOn(hitGO, damage, hit.point, rayDir);
+
+            // Fallback: destruir por Tag opcional
+            if (!applied && destroyTaggedBreakables && hitGO.CompareTag(breakableTag))
+            {
+                Destroy(hitGO);
+            }
         }
 
-        // 4) Proyectil físico (opcional)
+        // 4) Proyectil físico (opcional) + tracer
         if (bulletPrefab && muzzle)
         {
             Vector3 dirToEnd = (end - muzzle.position).normalized;
             var rb = Instantiate(bulletPrefab, muzzle.position, Quaternion.LookRotation(dirToEnd));
             rb.velocity = dirToEnd * bulletSpeed;
             Destroy(rb.gameObject, Mathf.Max(0.05f, bulletLife));
-
             if (forceImmediateTracer) StartCoroutine(SpawnLineTracer(start, end));
         }
         else
         {
-            // Hitscan + tracer visual
             StartCoroutine(SpawnLineTracer(start, end));
         }
 
@@ -241,8 +264,6 @@ public class Gun : MonoBehaviour
     {
         GameObject go = new GameObject("TracerTemp");
         go.transform.position = start;
-
-        // IMPORTANTE: capa del mundo para que lo vea la Main Camera
         go.layer = tracerOnWorldLayer ? tracerLayer : gameObject.layer;
 
         var tr = go.AddComponent<TrailRenderer>();
@@ -256,14 +277,13 @@ public class Gun : MonoBehaviour
 
         if (tracerMaterial)
         {
-            tr.material = tracerMaterial; // Asegurate: shader Particles/Unlit (Additive/Alpha), ZWrite Off, Queue >= 3000
+            tr.material = tracerMaterial;
         }
         else
         {
-            // Material por defecto seguro
             var sh = Shader.Find("Particles/Standard Unlit");
             tr.material = new Material(sh) { renderQueue = 3000 };
-            tr.material.SetFloat("_Mode", 2f); // Blend
+            tr.material.SetFloat("_Mode", 2f);
             tr.material.EnableKeyword("_ALPHABLEND_ON");
         }
 
@@ -274,7 +294,6 @@ public class Gun : MonoBehaviour
             rend.receiveShadows = false;
         }
 
-        // Avance del punto visual
         float dist = Vector3.Distance(start, end);
         float dur = Mathf.Max(0.02f, dist / Mathf.Max(1f, tracerVisualSpeed));
         float t = 0f;
@@ -287,7 +306,6 @@ public class Gun : MonoBehaviour
         }
         go.transform.position = end;
 
-        // Dejar disipar el trail
         yield return new WaitForSeconds(tr.time);
         Destroy(go);
     }
@@ -321,10 +339,8 @@ public class Gun : MonoBehaviour
             vfx.transform.localScale    = Vector3.one;
         }
 
-        // El fogonazo puede quedar en la capa del arma (overlay)
         SetLayerRecursively(vfx, gameObject.layer);
 
-        // Forzar espacio de simulación (LOCAL por defecto)
         var allPs = vfx.GetComponentsInChildren<ParticleSystem>(true);
         foreach (var ps in allPs)
         {
@@ -336,22 +352,22 @@ public class Gun : MonoBehaviour
             ps.Play(true);
         }
 
-#if UNITY_2019_3_OR_NEWER
+    #if UNITY_2019_3_OR_NEWER
         var vfxGraph = vfx.GetComponent<VisualEffect>();
         if (vfxGraph) vfxGraph.Play();
-#endif
+    #endif
 
         float life = Mathf.Max(0.05f, muzzleVfxLife);
         foreach (var ps in allPs)
         {
             var main = ps.main;
-#if UNITY_2022_1_OR_NEWER
+    #if UNITY_2022_1_OR_NEWER
             float lt = main.startLifetime.mode == ParticleSystemCurveMode.TwoConstants
                        ? main.startLifetime.constantMax
                        : main.startLifetime.constant;
-#else
+    #else
             float lt = main.startLifetime.constantMax;
-#endif
+    #endif
             life = Mathf.Max(life, main.duration + lt);
         }
 
@@ -445,9 +461,41 @@ public class Gun : MonoBehaviour
             ps.Play(true);
         }
 
-#if UNITY_2019_3_OR_NEWER
+    #if UNITY_2019_3_OR_NEWER
         var vfxGraph = root.GetComponent<VisualEffect>();
         if (vfxGraph) vfxGraph.Play();
-#endif
+    #endif
+    }
+
+    // --------- DAÑO por reflexión (robusto a diferentes firmas) ---------
+    bool TryApplyDamageOn(GameObject go, float amount, Vector3 hitPoint, Vector3 hitDir)
+    {
+        if (!go) return false;
+
+        // Recorremos TODOS los componentes y buscamos un método "ApplyDamage"
+        var comps = go.GetComponents<Component>();
+        for (int i = 0; i < comps.Length; i++)
+        {
+            var c = comps[i];
+            if (c == null) continue;
+            Type tp = c.GetType();
+
+            // 1) (float, Vector3, Vector3)
+            var m = tp.GetMethod("ApplyDamage", new Type[] { typeof(float), typeof(Vector3), typeof(Vector3) });
+            if (m != null) { m.Invoke(c, new object[] { amount, hitPoint, hitDir }); return true; }
+
+            // 2) (float, Vector3)
+            m = tp.GetMethod("ApplyDamage", new Type[] { typeof(float), typeof(Vector3) });
+            if (m != null) { m.Invoke(c, new object[] { amount, hitPoint }); return true; }
+
+            // 3) (float)
+            m = tp.GetMethod("ApplyDamage", new Type[] { typeof(float) });
+            if (m != null) { m.Invoke(c, new object[] { amount }); return true; }
+
+            // 4) ()
+            m = tp.GetMethod("ApplyDamage", Type.EmptyTypes);
+            if (m != null) { m.Invoke(c, null); return true; }
+        }
+        return false;
     }
 }

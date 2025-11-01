@@ -2,104 +2,113 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-[RequireComponent(typeof(Rigidbody))]
+[DisallowMultipleComponent]
 public class BulletProjectile : MonoBehaviour
 {
     [Header("Vida")]
     public float life = 3f;
 
-    [Header("Trail (se crea/ajusta en runtime)")]
-    public Material trailMaterial;     // Unlit/Transparent recomendado (opcional)
-    public float trailTime = 0.18f;    // duración visible
-    public float minVertexDistance = 0.04f;
-    public AnimationCurve trailWidth = AnimationCurve.EaseInOut(0, 0.16f, 1, 0.0f);
+    [Header("Trail")]
+    public float trailTime = 0.25f;
+    public float minVertexDistance = 0.02f;
+    public AnimationCurve trailWidth = AnimationCurve.EaseInOut(0, 0.2f, 1, 0.02f);
     public Gradient trailColor;
+    public Material trailMaterial;
+    [Range(0,8)] public int trailCornerVerts = 2;
+    [Range(0,8)] public int trailCapVerts    = 2;
 
-    [Header("Colisión (opcional)")]
-    public LayerMask hitMask = ~0;     // si querés filtrar impactos
-    public GameObject impactVfxPrefab; // opcional
+    [Header("Impacto")]
+    public GameObject impactVfxPrefab;
+    public float impactVfxLife = 1.0f;
+    public bool destroyOnImpact = true;
 
     TrailRenderer tr;
     Rigidbody rb;
+    Collider col;
+    float dieAt;
 
     void Awake()
     {
-        rb = GetComponent<Rigidbody>();
-        EnsureTrail();
+        rb  = GetComponent<Rigidbody>();
+        col = GetComponent<Collider>();
+        if (col) col.isTrigger = false;
+
+        // Configurar/crear TrailRenderer
+        tr = GetComponent<TrailRenderer>();
+        if (!tr) tr = gameObject.AddComponent<TrailRenderer>();
+
+        tr.time = Mathf.Max(0.05f, trailTime);
+        tr.minVertexDistance = Mathf.Max(0.001f, minVertexDistance);
+        tr.widthCurve = trailWidth;
+
+        if (trailColor != null && trailColor.colorKeys != null && trailColor.colorKeys.Length > 0)
+            tr.colorGradient = trailColor;
+
+        if (!trailMaterial)
+        {
+            // Material por defecto para ver el trail YA (unlit)
+            var sh = Shader.Find("Sprites/Default");
+            if (sh) trailMaterial = new Material(sh);
+        }
+        if (trailMaterial) tr.material = trailMaterial;
+
+        tr.numCornerVertices = trailCornerVerts;
+        tr.numCapVertices    = trailCapVerts;
+        tr.alignment = LineAlignment.View;
+        tr.receiveShadows = false;
+        tr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        tr.emitting = true; // importante: emite mientras la bala vive
     }
 
     void OnEnable()
     {
-        // limpiar rastro anterior si se reusa el prefab
-        if (tr) tr.Clear();
-        if (life > 0f) Destroy(gameObject, life);
+        dieAt = Time.time + Mathf.Max(0.05f, life);
     }
 
-    void EnsureTrail()
+    void Update()
     {
-        tr = GetComponent<TrailRenderer>();
-        if (!tr) tr = gameObject.AddComponent<TrailRenderer>();
-
-        tr.time = Mathf.Max(0.01f, trailTime);
-        tr.minVertexDistance = Mathf.Max(0.005f, minVertexDistance);
-        tr.widthCurve = trailWidth != null ? trailWidth : AnimationCurve.EaseInOut(0, 0.16f, 1, 0f);
-        tr.colorGradient = (trailColor != null && trailColor.colorKeys.Length > 0)
-            ? trailColor
-            : DefaultGradient();
-
-        tr.alignment = LineAlignment.View;               // siempre “de cara” a la cámara
-        tr.textureMode = LineTextureMode.Stretch;
-        tr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        tr.receiveShadows = false;
-        tr.numCornerVertices = 4;
-        tr.numCapVertices = 2;
-
-        // Material
-        if (trailMaterial)
-        {
-            tr.material = trailMaterial;
-        }
-        else
-        {
-            // Material fallback (unlit blanco)
-            var mat = new Material(Shader.Find("Sprites/Default"));
-            mat.renderQueue = 3000;
-            tr.material = mat;
-        }
-    }
-
-    Gradient DefaultGradient()
-    {
-        var g = new Gradient();
-        g.SetKeys(
-            new GradientColorKey[] {
-                new GradientColorKey(Color.white, 0f),
-                new GradientColorKey(new Color(1f,0.75f,0.35f), 0.12f),
-                new GradientColorKey(new Color(0.6f,0.8f,1f), 0.6f),
-                new GradientColorKey(new Color(0.2f,0.4f,1f), 1f)
-            },
-            new GradientAlphaKey[] {
-                new GradientAlphaKey(1f, 0f),
-                new GradientAlphaKey(0.85f, 0.12f),
-                new GradientAlphaKey(0.35f, 0.6f),
-                new GradientAlphaKey(0f, 1f)
-            }
-        );
-        return g;
+        if (Time.time >= dieAt)
+            StartCoroutine(KillAfterTrailDries());
     }
 
     void OnCollisionEnter(Collision c)
     {
-        // Impacto opcional + destrucción
-        if (((1 << c.gameObject.layer) & hitMask) != 0)
+        Vector3 pos = transform.position;
+        Vector3 nrm = -transform.forward;
+        if (c.contactCount > 0) { pos = c.contacts[0].point; nrm = c.contacts[0].normal; }
+        SpawnImpact(pos, nrm);
+
+        if (destroyOnImpact)
+            StartCoroutine(KillAfterTrailDries());
+    }
+
+    void OnTriggerEnter(Collider _)
+    {
+        SpawnImpact(transform.position, -transform.forward);
+        if (destroyOnImpact)
+            StartCoroutine(KillAfterTrailDries());
+    }
+
+    void SpawnImpact(Vector3 pos, Vector3 normal)
+    {
+        if (!impactVfxPrefab) return;
+        var v = Instantiate(impactVfxPrefab, pos, Quaternion.LookRotation(normal));
+        Destroy(v, Mathf.Max(0.1f, impactVfxLife));
+    }
+
+    IEnumerator KillAfterTrailDries()
+    {
+        // Detener física/colisiones pero dejar el trail visible
+        if (rb) { rb.isKinematic = true; rb.velocity = Vector3.zero; }
+        if (col) col.enabled = false;
+
+        // Cortar emisión y esperar a que se “seque” el rastro
+        if (tr)
         {
-            if (impactVfxPrefab)
-            {
-                var v = Instantiate(impactVfxPrefab, c.contacts[0].point,
-                                    Quaternion.LookRotation(c.contacts[0].normal));
-                Destroy(v, 2f);
-            }
+            tr.emitting = false;
+            yield return new WaitForSeconds(tr.time);
         }
+
         Destroy(gameObject);
     }
 }

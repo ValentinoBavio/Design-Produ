@@ -4,6 +4,8 @@ using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using UnityEngine.SceneManagement;
+
 
 public class ControladorJuego : MonoBehaviour
 {
@@ -48,6 +50,10 @@ public class ControladorJuego : MonoBehaviour
         {
             Debug.Log("Derrota");
             CambiarTemporizador(false);
+
+            Scene current = SceneManager.GetActiveScene();
+            SceneManager.LoadScene(current.name);
+
             _textoCrono.text = "Derrota";
             return;
         }

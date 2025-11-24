@@ -2,6 +2,9 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using System;
+using UnityEngine.Audio;
+using UnityEngine.UI;
+
 
 [RequireComponent(typeof(AudioSource))]
 public class ProceduralSlideNoise : MonoBehaviour
@@ -41,6 +44,22 @@ public class ProceduralSlideNoise : MonoBehaviour
     volatile bool wantMute = true;
     bool appliedMute = true;
 
+    public AudioMixer audioMixer;   // Poné el mixer acá
+    public Slider volumeSlider;     // Poné el slider del menú de pausa
+
+    void Start()
+    {
+        // Carga el volumen guardado previamente (opcional)
+        float savedVolume = PlayerPrefs.GetFloat("Master", 1f);
+        audioMixer.SetFloat("Master", savedVolume);
+        volumeSlider.value = savedVolume;
+    }
+
+    public void SetVolume(float volume)
+    {
+        audioMixer.SetFloat("Master", volume);
+        PlayerPrefs.SetFloat("Master", volume);
+    }
     void Awake()
     {
         // Asegurá que este GO tenga SOLO 1 AudioSource (el de este script)
@@ -57,7 +76,7 @@ public class ProceduralSlideNoise : MonoBehaviour
         src.playOnAwake = true;
         src.loop = true;
         src.spatialBlend = 0f; // 2D
-        src.volume = 1f;
+        src.volume = 0.015f;
 
         // clip dummy para disparar OnAudioFilterRead
         var dummy = AudioClip.Create("ProceduralSlideNoiseDummy", sampleRate, 1, sampleRate, false);

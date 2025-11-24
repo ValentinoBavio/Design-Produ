@@ -871,7 +871,7 @@ public class GrappleGun : MonoBehaviour
     }
 
     // ==================== AUDIO HELPERS ====================
-    void PlayOneShotSafe(AudioClip clip, float vol = 1f)
+    void PlayOneShotSafe(AudioClip clip, float vol = 0.015f)
     {
         if (!clip || sfxOneShot == null) return;
         sfxOneShot.PlayOneShot(clip, vol);

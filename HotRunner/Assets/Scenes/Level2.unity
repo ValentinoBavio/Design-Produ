@@ -35255,6 +35255,12 @@ PrefabInstance:
       propertyPath: m_audioClip
       value: 
       objectReference: {fileID: 8300000, guid: 6367a22f3386f0f4f9588b37e576a1d6, type: 3}
+    - target: {fileID: 1752501505266514437, guid: 3bbf62f2b7d80b74292f56b72db2ab86,
+        type: 3}
+      propertyPath: OutputAudioMixerGroup
+      value: 
+      objectReference: {fileID: 24300002, guid: 6425ea2c149cd7741b8c8e95213b9571,
+        type: 2}
     - target: {fileID: 1983163448525620313, guid: 3bbf62f2b7d80b74292f56b72db2ab86,
         type: 3}
       propertyPath: grappleMask.m_Bits

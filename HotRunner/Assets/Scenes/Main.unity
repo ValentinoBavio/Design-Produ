@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 0}
-  m_IndirectSpecularColor: {r: 0.0713111, g: 0.018429127, b: 0.078939974, a: 1}
+  m_IndirectSpecularColor: {r: 0.07124226, g: 0.018382207, b: 0.07887196, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -10536,6 +10536,12 @@ LightingSettings:
   m_PVRTiledBaking: 0
   m_NumRaysToShootPerTexel: -1
   m_RespectSceneVisibilityWhenBakingGI: 0
+--- !u!20 &2082807158 stripped
+Camera:
+  m_CorrespondingSourceObject: {fileID: 4733251339968788574, guid: 3bbf62f2b7d80b74292f56b72db2ab86,
+    type: 3}
+  m_PrefabInstance: {fileID: 1759229598568119285}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &2096613257
 GameObject:
   m_ObjectHideFlags: 0
@@ -10947,6 +10953,11 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 5893365627989790502, guid: 3bbf62f2b7d80b74292f56b72db2ab86,
+        type: 3}
+      propertyPath: targetCamera
+      value: 
+      objectReference: {fileID: 2082807158}
     - target: {fileID: 8011830515854681902, guid: 3bbf62f2b7d80b74292f56b72db2ab86,
         type: 3}
       propertyPath: m_Name

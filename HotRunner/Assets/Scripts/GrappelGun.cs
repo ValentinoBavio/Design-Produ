@@ -21,6 +21,10 @@ public class GrappleGun : MonoBehaviour
     public LineRenderer lineRenderer;      // Use World Space = ON
     public LayerMask grappleMask = ~0;     // capas válidas de anclaje
 
+    [Header("Player (opcional)")]
+    [Tooltip("Si queda vacío, se auto-busca con GetComponent<PlayerMovementAdvanced_>() en Awake().")]
+    public PlayerMovementAdvanced_ playerMove;
+
     // ---------- UI: Prompt debajo de la mira (opcional) ----------
     [Header("Prompt UI (opcional)")]
     public TextMeshProUGUI promptText;
@@ -141,6 +145,8 @@ public class GrappleGun : MonoBehaviour
     enum State { Idle, Casting, Attached }
     State state = State.Idle;
 
+    public bool IsAttached => state == State.Attached;
+
     Vector3 ropeTip, ropeDir;
     float ropeTraveled;
 
@@ -172,10 +178,15 @@ public class GrappleGun : MonoBehaviour
     bool pullPlayedThisAttach;
     bool prevReeling;
 
+    // Notificación a PlayerMovement (para stamina)
+    bool _pmNotifiedAttached = false;
+
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
         if (firePoint == null && Camera.main) firePoint = Camera.main.transform;
+
+        if (!playerMove) playerMove = GetComponent<PlayerMovementAdvanced_>();
 
         if (lineRenderer != null)
         {
@@ -359,6 +370,10 @@ public class GrappleGun : MonoBehaviour
     void RetargetCast()
     {
         if (debugLogs) Debug.Log("[GrappleGun] RetargetCast()");
+
+        // Si estabas Attached y retargeteás, avisar que se cortó el grapple anterior.
+        NotifyPlayerMoveDetachedIfNeeded();
+
         StashLastAnchor();
 
         if (joint)
@@ -494,6 +509,13 @@ public class GrappleGun : MonoBehaviour
         prevReeling = false;
         PlayOneShotSafe(sfxAttach, 1f);
 
+        // ✅ Notificar a PlayerMovement para reglas de stamina
+        if (playerMove)
+        {
+            playerMove.OnGrappleAttached();
+            _pmNotifiedAttached = true;
+        }
+
         if (debugLogs) Debug.Log("[GrappleGun] Attached at " + grapplePoint);
     }
 
@@ -624,12 +646,24 @@ public class GrappleGun : MonoBehaviour
         lineRenderer.SetPosition(1, end);
     }
 
+    void NotifyPlayerMoveDetachedIfNeeded()
+    {
+        if (_pmNotifiedAttached && playerMove)
+        {
+            playerMove.OnGrappleDetached();
+        }
+        _pmNotifiedAttached = false;
+    }
+
     // ================== STOP ==================
     public void StopGrapple(bool playFail = false)
     {
         // FAIL: sólo si veníamos casteando y no pegamos
         if (playFail && castInProgress && !attachedThisCast)
             PlayOneShotSafe(sfxFail, 1f);
+
+        // ✅ si veníamos Attached, avisar al PlayerMovement antes de limpiar estado
+        NotifyPlayerMoveDetachedIfNeeded();
 
         // Cooldown al cortar
         if (useCooldown) nextReadyTime = Time.time + grappleCooldown;
@@ -666,6 +700,9 @@ public class GrappleGun : MonoBehaviour
 
     void HardStop()
     {
+        // ✅ si veníamos Attached, avisar al PlayerMovement antes de limpiar estado
+        NotifyPlayerMoveDetachedIfNeeded();
+
         if (joint) Destroy(joint);
         joint = null;
 

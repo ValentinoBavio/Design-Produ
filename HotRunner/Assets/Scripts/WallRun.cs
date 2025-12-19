@@ -48,6 +48,7 @@ public class WallRun : MonoBehaviour
 
     Rigidbody rb;
     CapsuleCollider col;
+    PlayerMovementAdvanced_ playerMove;
 
     bool isWallRunning;
     bool leftWall, rightWall;
@@ -60,16 +61,16 @@ public class WallRun : MonoBehaviour
     float sameWallBlockTimer = 0f;
     Vector3 lastWallNormal = Vector3.zero;
 
-    // Exponer estado para Player
     public bool IsRunning => isWallRunning;
 
-    // cache de forward robusto (para transfers)
     Vector3 lastGoodPlanarForward = Vector3.forward;
 
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
         col = GetComponent<CapsuleCollider>();
+        playerMove = GetComponent<PlayerMovementAdvanced_>();
+
         if (head == null) head = transform;
         if (cameraFollow == null && Camera.main)
             cameraFollow = Camera.main.GetComponent<CameraFollow>();
@@ -83,7 +84,7 @@ public class WallRun : MonoBehaviour
         bool grounded = IsGrounded();
 
         if (wallJumpCooldown > 0f) wallJumpCooldown -= Time.deltaTime;
-        if (reattachTimer   > 0f) reattachTimer   -= Time.deltaTime;
+        if (reattachTimer > 0f) reattachTimer -= Time.deltaTime;
         if (sameWallBlockTimer > 0f) sameWallBlockTimer -= Time.deltaTime;
 
         if (!isWallRunning && !grounded && forwardHeld && (leftWall || rightWall)
@@ -96,8 +97,16 @@ public class WallRun : MonoBehaviour
         {
             runTimer += Time.deltaTime;
 
+            // STAMINA: drena durante wallrun (vacía en maxWallRunTime)
+            if (playerMove && playerMove.usarStamina)
+            {
+                playerMove.DrainStaminaForWallRun(Time.deltaTime, maxWallRunTime);
+            }
+
             bool lostWall = !(leftWall || rightWall);
-            bool timeOver = runTimer >= maxWallRunTime;
+            bool timeOver =
+                (playerMove && playerMove.usarStamina) ? (playerMove.Stamina01 <= 0.0001f)
+                                                      : (runTimer >= maxWallRunTime);
 
             if (!forwardHeld || lostWall || timeOver)
                 StopWallRun(timeOver || lostWall);
@@ -148,8 +157,8 @@ public class WallRun : MonoBehaviour
         wallNormal = Vector3.zero;
 
         Vector3 origin = col.bounds.center;
-        Vector3 leftDir  = -Vector3.ProjectOnPlane(head.right, Vector3.up).normalized;
-        Vector3 rightDir =  Vector3.ProjectOnPlane(head.right, Vector3.up).normalized;
+        Vector3 leftDir = -Vector3.ProjectOnPlane(head.right, Vector3.up).normalized;
+        Vector3 rightDir = Vector3.ProjectOnPlane(head.right, Vector3.up).normalized;
 
         if (Physics.Raycast(origin, leftDir, out RaycastHit lHit, wallCheckDistance, wallMask, QueryTriggerInteraction.Ignore))
         {
@@ -169,10 +178,6 @@ public class WallRun : MonoBehaviour
                     wallNormal = rHit.normal;
             }
         }
-
-        Debug.DrawRay(origin, leftDir  * wallCheckDistance, leftWall  ? Color.green : Color.gray);
-        Debug.DrawRay(origin, rightDir * wallCheckDistance, rightWall ? Color.green : Color.gray);
-        if (wallNormal != Vector3.zero) Debug.DrawRay(origin, wallNormal, Color.cyan);
 
         camTiltTarget = isWallRunning ? (rightWall ? camTilt : (leftWall ? -camTilt : 0f)) : 0f;
     }
@@ -203,6 +208,10 @@ public class WallRun : MonoBehaviour
         isWallRunning = true;
         runTimer = 0f;
         camTiltTarget = rightWall ? camTilt : (leftWall ? -camTilt : 0f);
+
+        // IMPORTANTE: al empezar wallrun recargás barra y reseteás doble salto
+        if (playerMove)
+            playerMove.OnWallRunStarted();
     }
 
     void StopWallRun(bool blockSameWall = false)
@@ -224,39 +233,37 @@ public class WallRun : MonoBehaviour
 
     void DoWallJump()
     {
-        Vector3 up = Vector3.up;
-        Vector3 n  = wallNormal.normalized;
+        // wall-jump = "salto" -> gasta media barra y habilita doble salto después
+        if (playerMove)
+            playerMove.OnWallJumpExecuted();
 
-        // Tangente del corredor (perpendicular a la normal y al up)
+        Vector3 up = Vector3.up;
+        Vector3 n = wallNormal.normalized;
+
         Vector3 tangent = Vector3.Cross(n, up);
         if (tangent.sqrMagnitude < 1e-6f) tangent = transform.forward;
         tangent.Normalize();
 
-        // Elegir sentido de la tangente según cámara (para ir hacia la pared de enfrente)
         Vector3 camPlanar = GetCamPlanarForwardSafe();
         if (Vector3.Dot(tangent, camPlanar) < 0f) tangent = -tangent;
 
-        // Garantizar mínimo tangencial para no ir vertical
         Vector3 planarVel = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
         float alongNow = Vector3.Dot(planarVel, tangent);
         float targetAlong = Mathf.Max(Mathf.Abs(alongNow), wallJumpTangentialMin);
         Vector3 keepPlanar = tangent * targetAlong;
 
-        // Empuje alejándote de la pared + up
         Vector3 awayPlanar = n * wallJumpSideForce;
 
-        // Componer nueva velocidad (no matar ascenso)
         float vy = Mathf.Max(0f, rb.velocity.y);
         Vector3 newPlanar = keepPlanar + awayPlanar;
 
         rb.velocity = new Vector3(newPlanar.x, vy, newPlanar.z);
         rb.AddForce(up * wallJumpUpForce, ForceMode.VelocityChange);
 
-        // Cooldowns
         wallJumpCooldown = 0.15f;
         lastWallNormal = n;
         sameWallBlockTimer = Mathf.Max(sameWallBlockTimer, sameWallCooldown);
-        reattachTimer     = Mathf.Max(reattachTimer, reattachCooldown);
+        reattachTimer = Mathf.Max(reattachTimer, reattachCooldown);
 
         StopWallRun();
     }

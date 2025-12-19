@@ -1,0 +1,56 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d30c76a3a3cf03945bde3aceee30697c, type: 3}
+  m_Name: Nivel1_CalificacionConfig
+  m_EditorClassIdentifier: 
+  nivelId: Nivel_1
+  reglas:
+  - calificacion: 0
+    tiempoMaxSegundos: 55
+    chipsFijos: 100
+    multiplicadorChipsRecolectados: 5
+    divisorEstilo: 2
+  - calificacion: 1
+    tiempoMaxSegundos: 65
+    chipsFijos: 75
+    multiplicadorChipsRecolectados: 3
+    divisorEstilo: 3
+  - calificacion: 2
+    tiempoMaxSegundos: 75
+    chipsFijos: 50
+    multiplicadorChipsRecolectados: 2
+    divisorEstilo: 4
+  - calificacion: 3
+    tiempoMaxSegundos: 80
+    chipsFijos: 0
+    multiplicadorChipsRecolectados: 1
+    divisorEstilo: 10
+  - calificacion: 4
+    tiempoMaxSegundos: 85
+    chipsFijos: 0
+    multiplicadorChipsRecolectados: 1
+    divisorEstilo: 10
+  - calificacion: 5
+    tiempoMaxSegundos: 95
+    chipsFijos: 0
+    multiplicadorChipsRecolectados: 1
+    divisorEstilo: 10
+  - calificacion: 6
+    tiempoMaxSegundos: 100
+    chipsFijos: 0
+    multiplicadorChipsRecolectados: 1
+    divisorEstilo: 10
+  - calificacion: 7
+    tiempoMaxSegundos: 99999
+    chipsFijos: 0
+    multiplicadorChipsRecolectados: 1
+    divisorEstilo: 100

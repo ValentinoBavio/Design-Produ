@@ -84,6 +84,17 @@ public class ControladorJuego : MonoBehaviour
     private float _tiempoNivel;
     private bool _cronometroNivelActivo = false;
 
+    // ===== EVENTO GAME OVER (TIEMPO AGOTADO) =====
+    public event System.Action OnTiempoAgotado;
+    private bool _tiempoAgotadoNotificado = false;
+
+    void NotificarTiempoAgotadoUnaVez()
+    {
+        if (_tiempoAgotadoNotificado) return;
+        _tiempoAgotadoNotificado = true;
+        OnTiempoAgotado?.Invoke();
+    }
+
     // -------- Chips --------
     [Header("UI - Chips")]
     [SerializeField] private TextMeshProUGUI _textoChips; // Ej: "x 000"
@@ -158,6 +169,9 @@ public class ControladorJuego : MonoBehaviour
 
             // ✅ lo pausamos (después vemos game over)
             _tiempoActivado = false;
+
+            // ✅ EVENTO: tiempo agotado (una sola vez)
+            NotificarTiempoAgotadoUnaVez();
             return;
         }
 
@@ -235,6 +249,8 @@ public class ControladorJuego : MonoBehaviour
 
     public void ActivarTemporizador()
     {
+        _tiempoAgotadoNotificado = false; // ✅ reset del evento
+
         _tiempoMaximo = Mathf.Max(0.01f, _tiempoMaximo);
         _tiempoActual = _tiempoMaximo;
 
@@ -247,6 +263,8 @@ public class ControladorJuego : MonoBehaviour
 
     public void ReanudarTemporizadorSinReset()
     {
+        _tiempoAgotadoNotificado = false; // ✅ reset del evento
+
         _tiempoMaximo = Mathf.Max(0.01f, _tiempoMaximo);
         _tiempoActual = Mathf.Clamp(_tiempoActual, 0f, _tiempoMaximo);
 
@@ -296,6 +314,9 @@ public class ControladorJuego : MonoBehaviour
             ActualizarTextoTemporizador();
 
             _tiempoActivado = false;
+
+            // ✅ EVENTO: tiempo agotado (una sola vez)
+            NotificarTiempoAgotadoUnaVez();
         }
     }
 

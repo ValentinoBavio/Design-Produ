@@ -5,8 +5,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
-[RequireComponent(typeof(TextMeshProUGUI))]
-public class GlitchTypewriterTMP : MonoBehaviour
+public class GameOverManager : MonoBehaviour
 {
     [Header("Fuente")]
     public ControladorJuego controladorJuego;
@@ -18,7 +17,7 @@ public class GlitchTypewriterTMP : MonoBehaviour
     public MonoBehaviour[] componentesAApagar;
 
     [Header("Cámara (efecto caída)")]
-    public Transform cameraRig; // tu Head (padre de la cámara)
+    public Transform cameraRig; // Head
     public Camera cam;
 
     [Header("Evitar atravesar suelo (Raycast)")]
@@ -27,36 +26,18 @@ public class GlitchTypewriterTMP : MonoBehaviour
     public float alturaMinSobreSuelo = 0.15f;
 
     [Header("Impacto (más duro)")]
-    [Tooltip("Duración del golpe inicial (más chico = más seco).")]
     public float durImpactoSeg = 0.18f;
-
-    [Tooltip("Cuánto baja rápido en el golpe inicial (local Y).")]
     public float impactBajarLocalY = 0.25f;
-
-    [Tooltip("Pitch extra del golpe inicial (sumado).")]
     public float impactPitchExtra = 25f;
-
-    [Tooltip("Shake extra durante el impacto (se suma al shakeAmp).")]
     public float impactShakeExtra = 0.04f;
-
-    [Tooltip("Extra de FOV solo en el golpe inicial.")]
     public float impactFovExtra = 18f;
 
     [Header("Caída (más rápida)")]
     public float durCaidaSeg = 0.38f;
-
-    [Tooltip(
-        "Cuánto intenta bajar la cámara en la caída (local Y). Si el piso está antes, se limita."
-    )]
     public float bajarLocalY = 0.65f;
-
-    [Tooltip("Cuánto mira hacia el piso (pitch positivo)")]
     public float pitchHaciaAbajo = 75f;
-
-    [Tooltip("Roll de cámara para 'desmayo'")]
     public float rollGrados = 12f;
 
-    [Tooltip("Sacudida leve base")]
     public float shakeAmp = 0.02f;
     public float shakeFreq = 18f;
 
@@ -75,15 +56,17 @@ public class GlitchTypewriterTMP : MonoBehaviour
     [Header("Fade a negro (3s) SIN CanvasGroup")]
     public Image panelNegro;
     public TextMeshProUGUI txtGameOver;
-
-    [Tooltip("El GO (o padre) del texto 'Press Any Button' para activarlo/desactivarlo.")]
-    public GameObject pressAnyRoot;
-
-    public TextMeshProUGUI txtPressAny;
     public float fadeToBlackSeg = 3f;
 
-    [Header("Pulso (Press Any)")]
-    public TMPPulseUnscaled pulsePressAny; // opcional (se habilita al final)
+    [Header("Press Any (NO debe verse hasta el final)")]
+    [Tooltip("Arrastrá acá el GO padre (PressAnyButton).")]
+    public GameObject pressAnyRoot;
+
+    [Tooltip("Arrastrá el TMP del texto Press Any.")]
+    public TextMeshProUGUI txtPressAny;
+
+    [Tooltip("Si usás pulso, arrastrá el componente TMPPulseUnscaled del PressAny.")]
+    public TMPPulseUnscaled pulsePressAny;
 
     [Header("Tiempo (slow motion antes del fade)")]
     public bool usarSlowMo = true;
@@ -115,16 +98,18 @@ public class GlitchTypewriterTMP : MonoBehaviour
         if (cam)
             _fov0 = cam.fieldOfView;
 
-        // iniciar oculto
+        // Arrancar oculto
         SetAlphaImage(panelNegro, 0f);
         SetAlphaTMP(txtGameOver, 0f);
 
-        // ✅ Press Any NO debe verse nunca hasta el final:
-        if (pressAnyRoot)
-            pressAnyRoot.SetActive(false);
-        SetAlphaTMP(txtPressAny, 0f);
-        if (pulsePressAny)
-            pulsePressAny.enabled = false;
+        // ✅ FORZAR ocultar PressAny desde el arranque
+        ForceHidePressAny();
+    }
+
+    private void Start()
+    {
+        // por si algún Animator lo prende en Start, lo volvemos a ocultar
+        ForceHidePressAny();
     }
 
     private void OnEnable()
@@ -141,22 +126,23 @@ public class GlitchTypewriterTMP : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (!_gameOverActivo)
-            return;
-        if (!forzarBloqueoCamara)
-            return;
-        if (!cameraRig)
-            return;
-        if (!_lockInicializado)
-            return;
-
-        cameraRig.localPosition = _lockLocalPos;
-        cameraRig.localRotation = _lockLocalRot;
+        if (_gameOverActivo && forzarBloqueoCamara && cameraRig && _lockInicializado)
+        {
+            cameraRig.localPosition = _lockLocalPos;
+            cameraRig.localRotation = _lockLocalRot;
+        }
     }
 
     private void Update()
     {
-        if (!_gameOverActivo || !_puedeReiniciar)
+        // ✅ Mientras NO sea game over, que NO se vea nunca (aunque otro script lo active)
+        if (!_gameOverActivo)
+        {
+            ForceHidePressAny();
+            return;
+        }
+
+        if (!_puedeReiniciar)
             return;
 
         if (
@@ -181,12 +167,12 @@ public class GlitchTypewriterTMP : MonoBehaviour
 
     IEnumerator RutinaGameOver()
     {
-        // Ocultar HUD
+        // HUD off
         for (int i = 0; i < hudObjectsToHide.Length; i++)
             if (hudObjectsToHide[i])
                 hudObjectsToHide[i].SetActive(false);
 
-        // Apagar control del player
+        // Player control off
         for (int i = 0; i < componentesAApagar.Length; i++)
             if (componentesAApagar[i])
                 componentesAApagar[i].enabled = false;
@@ -207,7 +193,7 @@ public class GlitchTypewriterTMP : MonoBehaviour
         if (usarSlowMo)
             Time.timeScale = Mathf.Clamp(timeScaleDuranteEfecto, 0.01f, 1f);
 
-        // Impacto duro + caída rápida
+        // Impacto + caída
         yield return FaseImpactoDuro();
         yield return FaseCaidaRapida();
 
@@ -216,22 +202,64 @@ public class GlitchTypewriterTMP : MonoBehaviour
 
         yield return WaitUnscaled(durHoldAntesFade);
 
-        // Fade a negro: mostramos GameOver durante el fade
+        // Fade: aparece GAME OVER
         yield return FadeToBlack_SinCanvasGroup();
 
         // Pausa total
         Time.timeScale = 0f;
 
-        // ✅ recién acá aparece Press Any (con pulso)
-        if (pressAnyRoot)
-            pressAnyRoot.SetActive(true);
-        SetAlphaTMP(txtPressAny, 1f);
-        if (pulsePressAny)
-            pulsePressAny.enabled = true;
+        // ✅ recién acá aparece PRESS ANY
+        ShowPressAny();
 
         yield return WaitUnscaled(0.15f);
         _puedeReiniciar = true;
     }
+
+    // ------------------- PRESS ANY (FORCE HIDE / SHOW) -------------------
+
+    void ForceHidePressAny()
+    {
+        if (pressAnyRoot && pressAnyRoot.activeSelf)
+            pressAnyRoot.SetActive(false);
+
+        if (txtPressAny && txtPressAny.gameObject.activeSelf)
+            txtPressAny.gameObject.SetActive(false);
+
+        SetAlphaTMP(txtPressAny, 0f);
+
+        if (pulsePressAny)
+            pulsePressAny.enabled = false;
+
+        // Si le pusiste GlitchTypewriterTMP al mismo TMP, lo apagamos para que no escriba antes
+        if (txtPressAny)
+        {
+            var glitch = txtPressAny.GetComponent<GlitchTypewriterTMP>();
+            if (glitch)
+                glitch.enabled = false;
+        }
+    }
+
+    void ShowPressAny()
+    {
+        if (pressAnyRoot)
+            pressAnyRoot.SetActive(true);
+        if (txtPressAny)
+            txtPressAny.gameObject.SetActive(true);
+
+        SetAlphaTMP(txtPressAny, 1f);
+
+        if (pulsePressAny)
+            pulsePressAny.enabled = true;
+
+        if (txtPressAny)
+        {
+            var glitch = txtPressAny.GetComponent<GlitchTypewriterTMP>();
+            if (glitch)
+                glitch.enabled = true;
+        }
+    }
+
+    // ------------------- EFECTOS CÁMARA -------------------
 
     IEnumerator FaseImpactoDuro()
     {
@@ -241,7 +269,6 @@ public class GlitchTypewriterTMP : MonoBehaviour
         Vector3 startPos = _rigLocalPos0;
         Quaternion startRot = _rigLocalRot0;
 
-        // target impacto (bajón rápido) + clamp al suelo
         Vector3 impactLocal = _rigLocalPos0 + Vector3.down * impactBajarLocalY;
         Vector3 impactWorld = LocalToWorld(impactLocal);
         impactWorld = ClampWorldToGround(impactWorld);
@@ -253,9 +280,10 @@ public class GlitchTypewriterTMP : MonoBehaviour
         while (t < 1f)
         {
             t += Time.unscaledDeltaTime / dur;
-            float s = EaseOutCubic01(t); // seco
+            float s = EaseOutCubic01(t);
 
             float shake = Shake01() * (shakeAmp + impactShakeExtra);
+
             if (cameraRig)
             {
                 cameraRig.localPosition =
@@ -284,7 +312,6 @@ public class GlitchTypewriterTMP : MonoBehaviour
         Quaternion startRot = cameraRig ? cameraRig.localRotation : _rigLocalRot0;
         float startFov = cam ? cam.fieldOfView : _fov0;
 
-        // target final (local) + clamp al suelo
         Vector3 desiredLocal = _rigLocalPos0 + Vector3.down * bajarLocalY;
         Vector3 desiredWorld = LocalToWorld(desiredLocal);
         desiredWorld = ClampWorldToGround(desiredWorld);
@@ -302,7 +329,6 @@ public class GlitchTypewriterTMP : MonoBehaviour
             {
                 cameraRig.localPosition = Vector3.Lerp(startPos, posTargetLocal, s);
 
-                // shake va muriendo
                 float shake = Shake01() * Mathf.Lerp(shakeAmp, 0f, s);
                 cameraRig.localPosition += new Vector3(shake, shake * 0.5f, 0f);
 
@@ -338,14 +364,12 @@ public class GlitchTypewriterTMP : MonoBehaviour
         Vector3 basePos = cameraRig.localPosition;
         Quaternion baseRot = cameraRig.localRotation;
 
-        // sube un toque
         yield return MoveLocalY(
             basePos,
             baseRot,
             basePos.y + reboteSubeLocalY,
             reboteDurSeg * 0.55f
         );
-        // vuelve y baja apenas (golpecito)
         yield return MoveLocalY(
             cameraRig.localPosition,
             baseRot,
@@ -353,7 +377,6 @@ public class GlitchTypewriterTMP : MonoBehaviour
             reboteDurSeg * 0.45f
         );
 
-        // clamp final por las dudas (world)
         Vector3 w = cameraRig.position;
         w = ClampWorldToGround(w);
         cameraRig.position = w;
@@ -385,6 +408,8 @@ public class GlitchTypewriterTMP : MonoBehaviour
         }
     }
 
+    // ------------------- FADE -------------------
+
     IEnumerator FadeToBlack_SinCanvasGroup()
     {
         float t = 0f;
@@ -405,6 +430,8 @@ public class GlitchTypewriterTMP : MonoBehaviour
         SetAlphaTMP(txtGameOver, 1f);
     }
 
+    // ------------------- REINICIO -------------------
+
     void ReiniciarNivel()
     {
         Time.timeScale = 1f;
@@ -419,6 +446,8 @@ public class GlitchTypewriterTMP : MonoBehaviour
 
         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
     }
+
+    // ------------------- HELPERS -------------------
 
     IEnumerator WaitUnscaled(float seconds)
     {

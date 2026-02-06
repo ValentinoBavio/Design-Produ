@@ -1,10 +1,6 @@
-using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
 using System;
+using UnityEngine;
 using UnityEngine.Audio;
-using UnityEngine.UI;
-
 
 [RequireComponent(typeof(AudioSource))]
 public class ProceduralSlideNoise : MonoBehaviour
@@ -20,8 +16,8 @@ public class ProceduralSlideNoise : MonoBehaviour
     public float maxGainDb = -8f;
 
     [Header("Color del ruido")]
-    [Range(0f,1f)] public float brightAtMin = 0.2f;
-    [Range(0f,1f)] public float brightAtMax = 0.85f;
+    [Range(0f, 1f)] public float brightAtMin = 0.2f;
+    [Range(0f, 1f)] public float brightAtMax = 0.85f;
 
     [Header("Envolvente (suavizado)")]
     public float attackTime = 0.06f;
@@ -44,25 +40,22 @@ public class ProceduralSlideNoise : MonoBehaviour
     volatile bool wantMute = true;
     bool appliedMute = true;
 
-    public AudioMixer audioMixer;   // Poné el mixer acá
-    public Slider volumeSlider;     // Poné el slider del menú de pausa
+    [Header("Audio Mixer (Master global)")]
+    [Tooltip("Arrastrá el AudioMixer asset acá.")]
+    public AudioMixer audioMixer;
 
-    void Start()
-    {
-        // Carga el volumen guardado previamente (opcional)
-        float savedVolume = PlayerPrefs.GetFloat("Master", 1f);
-        audioMixer.SetFloat("Master", savedVolume);
-        volumeSlider.value = savedVolume;
-    }
+    [Tooltip("Nombre EXACTO del parámetro expuesto del Master en el mixer (ej: MasterVolume).")]
+    public string masterParam = "MasterVolume";
 
-    public void SetVolume(float volume)
-    {
-        audioMixer.SetFloat("Master", volume);
-        PlayerPrefs.SetFloat("Master", volume);
-    }
+    [Tooltip("Si está activo, al iniciar aplica el volumen guardado en PlayerPrefs (key: 'Master') al mixer.")]
+    public bool applySavedMasterOnStart = true;
+
+    [Tooltip("Límites para cuando se guarda en dB.")]
+    public float minDbClamp = -80f;
+    public float maxDbClamp = 0f;
+
     void Awake()
     {
-        // Asegurá que este GO tenga SOLO 1 AudioSource (el de este script)
         var audios = GetComponents<AudioSource>();
         if (audios.Length > 1)
         {
@@ -83,7 +76,7 @@ public class ProceduralSlideNoise : MonoBehaviour
         src.clip = dummy;
         src.Play();
 
-        rng = new System.Random(System.Environment.TickCount ^ GetInstanceID());
+        rng = new System.Random(Environment.TickCount ^ GetInstanceID());
 
         // arranque silencioso
         curLinGain = 0f;
@@ -93,9 +86,69 @@ public class ProceduralSlideNoise : MonoBehaviour
         src.mute = true;
     }
 
+    void Start()
+    {
+        if (!applySavedMasterOnStart) return;
+
+        // "Master" puede estar guardado como lineal (0..1) o como dB (negativo).
+        float saved = PlayerPrefs.GetFloat("Master", 1f);
+
+        if (audioMixer != null && !string.IsNullOrEmpty(masterParam))
+        {
+            float dbToApply = SavedMasterToDb(saved);
+            audioMixer.SetFloat(masterParam, dbToApply);
+
+            if (debugLogs)
+                Debug.Log($"[ProceduralSlideNoise] Apply Master '{masterParam}' = {dbToApply:0.0} dB (raw saved={saved:0.###})");
+        }
+        else if (debugLogs)
+        {
+            Debug.LogWarning("[ProceduralSlideNoise] No se aplicó Master: AudioMixer o masterParam no asignado.");
+        }
+    }
+
+    // -------------------- API para tu MainMenu (por si querés llamarlo) --------------------
+
+    /// <summary>
+    /// Slider en 0..1 (lineal). Convierte a dB, aplica al mixer y guarda PlayerPrefs("Master") en LINEAL.
+    /// </summary>
+    public void SetMasterVolumeLinear(float linear01)
+    {
+        linear01 = Mathf.Clamp01(linear01);
+
+        if (audioMixer != null && !string.IsNullOrEmpty(masterParam))
+            audioMixer.SetFloat(masterParam, LinearToDb(linear01));
+
+        PlayerPrefs.SetFloat("Master", linear01);
+    }
+
+    /// <summary>
+    /// Si tu MainMenu ya trabaja en dB (ej -30..0), usa esto. Guarda PlayerPrefs("Master") en dB.
+    /// </summary>
+    public void SetMasterVolumeDb(float db)
+    {
+        float clamped = Mathf.Clamp(db, minDbClamp, maxDbClamp);
+
+        if (audioMixer != null && !string.IsNullOrEmpty(masterParam))
+            audioMixer.SetFloat(masterParam, clamped);
+
+        PlayerPrefs.SetFloat("Master", clamped);
+    }
+
+    float SavedMasterToDb(float saved)
+    {
+        // Si está en [0..1] => es lineal
+        if (saved >= 0f && saved <= 1.0f)
+            return LinearToDb(saved);
+
+        // Si no, asumimos que es dB guardado (negativo típicamente)
+        return Mathf.Clamp(saved, minDbClamp, maxDbClamp);
+    }
+
+    // -------------------- Loop principal --------------------
+
     void Update()
     {
-        // Auto-revivir la fuente si hace falta cuando estamos slideando
         if (sliding)
         {
             if (!src.isPlaying)
@@ -103,15 +156,13 @@ public class ProceduralSlideNoise : MonoBehaviour
                 if (debugLogs) Debug.Log("[ProceduralSlideNoise] Revive Play()");
                 src.Play();
             }
-            if (wantMute) wantMute = false; // desmutear en cuanto hay slide
+            if (wantMute) wantMute = false;
         }
         else
         {
-            // si no hay slide y estamos abajo del gate, pedimos mute (se aplicará acá)
             if (curLinGain <= hardGateLinear) wantMute = true;
         }
 
-        // aplicar mute/unmute en main thread
         if (appliedMute != wantMute)
         {
             src.mute = wantMute;
@@ -121,11 +172,10 @@ public class ProceduralSlideNoise : MonoBehaviour
 
     void OnAudioFilterRead(float[] data, int channels)
     {
-        // 1) Target gain (lineal)
         float targetLin;
         if (!sliding)
         {
-            targetLin = 0f; // silencio real si no hay slide
+            targetLin = 0f;
         }
         else
         {
@@ -134,41 +184,34 @@ public class ProceduralSlideNoise : MonoBehaviour
             targetLin = Mathf.Pow(10f, db / 20f);
         }
 
-        // 2) Coeficientes per-sample (sin Time.deltaTime)
         float atkTau = Mathf.Max(0.001f, attackTime);
         float relTau = Mathf.Max(0.001f, releaseTime);
         float atkCoeff = 1f - Mathf.Exp(-1f / (sampleRate * atkTau));
         float relCoeff = 1f - Mathf.Exp(-1f / (sampleRate * relTau));
 
-        // 3) Low-pass según brillo
         float brightT = Mathf.InverseLerp(minSpeed, maxSpeed, speed);
-        float bright  = Mathf.Lerp(brightAtMin, brightAtMax, Mathf.Clamp01(brightT));
+        float bright = Mathf.Lerp(brightAtMin, brightAtMax, Mathf.Clamp01(brightT));
         float cutoffHz = Mathf.Lerp(800f, 8000f, bright);
         float alpha = Mathf.Exp(-2f * Mathf.PI * cutoffHz / Mathf.Max(1, sampleRate));
 
-        // Gate duro solo cuando NO hay slide y estamos bien abajo
         bool gateSilence = (!sliding && curLinGain <= hardGateLinear && targetLin <= hardGateLinear);
         if (gateSilence)
         {
             for (int i = 0; i < data.Length; i++) data[i] = 0f;
             lpState = 0f;
-            wantMute = true; // se aplicará en Update
+            wantMute = true;
             return;
         }
 
-        wantMute = false; // hay actividad, asegurá unmute
+        wantMute = false;
 
-        // 4) Procesamiento
         for (int i = 0; i < data.Length; i += channels)
         {
-            // envelope attack/release
             float coeff = (targetLin > curLinGain) ? atkCoeff : relCoeff;
             curLinGain += (targetLin - curLinGain) * coeff;
 
-            // white noise [-1..1]
             float n = (float)(rng.NextDouble() * 2.0 - 1.0);
 
-            // low-pass
             lpState = (1f - alpha) * n + alpha * lpState;
 
             float sample = lpState * curLinGain;
@@ -176,5 +219,10 @@ public class ProceduralSlideNoise : MonoBehaviour
             for (int ch = 0; ch < channels; ch++)
                 data[i + ch] = sample;
         }
+    }
+
+    static float LinearToDb(float linear)
+    {
+        return Mathf.Log10(Mathf.Max(0.0001f, linear)) * 20f;
     }
 }

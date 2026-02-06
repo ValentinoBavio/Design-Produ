@@ -14,12 +14,21 @@ public class LaptopRTInput : BaseInput
 
     float _blockPointerUntil;
 
+    // ✅ NUEVO: bloquear Submit (Enter) por rebote
+    float _blockSubmitUntil;
+
     public void BlockPointer(float seconds)
     {
         _blockPointerUntil = Mathf.Max(_blockPointerUntil, Time.unscaledTime + seconds);
     }
 
+    public void BlockSubmit(float seconds)
+    {
+        _blockSubmitUntil = Mathf.Max(_blockSubmitUntil, Time.unscaledTime + Mathf.Max(0f, seconds));
+    }
+
     bool PointerBlocked => Time.unscaledTime < _blockPointerUntil;
+    bool SubmitBlocked  => Time.unscaledTime < _blockSubmitUntil;
 
     // =========================
     //  MOUSE (mapeado a RT)
@@ -75,10 +84,8 @@ public class LaptopRTInput : BaseInput
     {
         float v = 0f;
 
-        // Intenta Input Manager (si existe)
         try { v = Input.GetAxisRaw(axisName); } catch { v = 0f; }
 
-        // Fallback por si no tenés ejes configurados
         if (Mathf.Abs(v) < 0.001f)
         {
             if (axisName == "Horizontal")
@@ -98,17 +105,23 @@ public class LaptopRTInput : BaseInput
 
     // =========================
     //  NAVEGACIÓN (Submit/Cancel)
-    //  OJO: BaseInput en 2022.3 solo expone GetButtonDown()
     // =========================
     public override bool GetButtonDown(string buttonName)
     {
+        // ✅ bloquear Submit por rebote
+        if (SubmitBlocked && buttonName == "Submit")
+            return false;
+
         bool b = false;
         try { b = Input.GetButtonDown(buttonName); } catch { b = false; }
 
         if (!b)
         {
             if (buttonName == "Submit")
-                b = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space);
+            {
+                // ✅ SOLO Enter (saco Space para evitar submits accidentales mientras tipeás)
+                b = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter);
+            }
 
             if (buttonName == "Cancel")
                 b = Input.GetKeyDown(KeyCode.Escape);

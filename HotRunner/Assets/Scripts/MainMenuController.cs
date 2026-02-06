@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using Cinemachine;
 
@@ -28,6 +27,10 @@ public class MainMenuIntroController : MonoBehaviour
     [Tooltip("Si usás el rig por script (RenderTexture menu), arrastralo acá para mostrarlo bien.")]
     public LaptopMenuRenderTextureRig laptopMenuRig;
 
+    [Header("Evitar UI duplicada (cuando usás el rig)")]
+    [Tooltip("Si laptopMenuRoot contiene un Canvas viejo con botones (INIT SESSION clásico), se apaga para que no se dispare LoadingScene por ese UI.")]
+    public bool disableOtherCanvasesInLaptopMenuRootWhenUsingRig = true;
+
     [Header("Timing")]
     public float ignoreInputSeconds = 0.25f;
     public float afterBlendDelay = 0.10f;
@@ -40,6 +43,7 @@ public class MainMenuIntroController : MonoBehaviour
     public bool unlockCursorOnMenu = true;
 
     bool _transitioning;
+    bool _inLaptop;
     float _ignoreUntil;
 
     void Awake()
@@ -67,6 +71,9 @@ public class MainMenuIntroController : MonoBehaviour
         if (laptopMenuRig != null)
             laptopMenuRig.OcultarMenu(false);
 
+        _inLaptop = false;
+        _transitioning = false;
+
         if (unlockCursorOnMenu)
         {
             Cursor.lockState = CursorLockMode.Locked;
@@ -81,10 +88,10 @@ public class MainMenuIntroController : MonoBehaviour
 
     void Update()
     {
+        if (_inLaptop) return;
         if (_transitioning) return;
         if (Time.unscaledTime < _ignoreUntil) return;
 
-        // Esto detecta cualquier tecla/botón/mouse.
         if (Input.anyKeyDown)
             StartCoroutine(CoGoToLaptop());
     }
@@ -93,16 +100,11 @@ public class MainMenuIntroController : MonoBehaviour
     {
         _transitioning = true;
 
-        // ✅ apagar “Press any” sí o sí primero (aunque esté en otro canvas)
         if (pressAnyRoot) pressAnyRoot.SetActive(false);
-
-        // ✅ apagar todo el intro (título + lo que sea)
         if (introRoot) introRoot.SetActive(false);
 
-        // cambiar a cámara laptop
         if (vcamLaptop) vcamLaptop.Priority = laptopPriorityActive;
 
-        // esperar blend
         if (brain != null)
         {
             yield return null;
@@ -124,12 +126,28 @@ public class MainMenuIntroController : MonoBehaviour
         // prender root si lo usás
         if (laptopMenuRoot) laptopMenuRoot.SetActive(true);
 
+        // ✅ Si usás el rig, apagamos canvases viejos dentro de laptopMenuRoot (pero NO apagamos lo que cuelgue del rig).
+        if (disableOtherCanvasesInLaptopMenuRootWhenUsingRig && laptopMenuRoot != null && laptopMenuRig != null)
+        {
+            var canvases = laptopMenuRoot.GetComponentsInChildren<Canvas>(true);
+            for (int i = 0; i < canvases.Length; i++)
+            {
+                var c = canvases[i];
+                if (c == null) continue;
+
+                // Si este canvas es parte del rig, lo dejamos.
+                if (c.transform.IsChildOf(laptopMenuRig.transform)) continue;
+
+                // Apagamos canvas viejo (evita botón INIT SESSION duplicado que te manda a LoadingScene)
+                c.gameObject.SetActive(false);
+            }
+        }
+
         // ✅ MOSTRAR menú usando el rig (incluye su propio guard de Submit)
         if (laptopMenuRig != null)
         {
             laptopMenuRig.MostrarMenu(true);
 
-            // Guard extra para que Enter no dispare Start por rebote (por si tu input module mete Submit)
             if (menuInputGuardSeconds > 0f)
                 yield return new WaitForSecondsRealtime(menuInputGuardSeconds);
         }
@@ -140,6 +158,7 @@ public class MainMenuIntroController : MonoBehaviour
             Cursor.visible = true;
         }
 
+        _inLaptop = true;
         _transitioning = false;
     }
 }

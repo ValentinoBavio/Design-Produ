@@ -88,10 +88,35 @@ public class ControladorJuego : MonoBehaviour
     public event System.Action OnTiempoAgotado;
     private bool _tiempoAgotadoNotificado = false;
 
+    // =========================
+    // NUEVO: Bloqueo de pausa por tiempo agotado
+    // =========================
+    [Header("PauseMenu - Bloquear pausa cuando tiempo llega a 0")]
+    [Tooltip("Arrastrá el PauseMenu aquí. Si lo dejás vacío, lo busca solo.")]
+    [SerializeField] private PauseMenu pauseMenu;
+    [SerializeField] private bool autoFindPauseMenu = true;
+
+    void ResolvePauseMenu()
+    {
+        if (pauseMenu == null && autoFindPauseMenu)
+            pauseMenu = FindObjectOfType<PauseMenu>(true);
+    }
+
+    void SetPauseDead(bool dead)
+    {
+        ResolvePauseMenu();
+        if (pauseMenu != null)
+            pauseMenu.SetPlayerDead(dead);
+    }
+
     void NotificarTiempoAgotadoUnaVez()
     {
         if (_tiempoAgotadoNotificado) return;
         _tiempoAgotadoNotificado = true;
+
+        // ✅ NUEVO: en cuanto el tiempo llega a 0, bloqueamos pausa ya mismo
+        SetPauseDead(true);
+
         OnTiempoAgotado?.Invoke();
     }
 
@@ -107,6 +132,8 @@ public class ControladorJuego : MonoBehaviour
 
     void Awake()
     {
+        ResolvePauseMenu();
+
         _tiempoMaximo = Mathf.Max(0.01f, _tiempoMaximo);
 
         _tiempoActual = _tiempoMaximo;
@@ -188,7 +215,6 @@ public class ControladorJuego : MonoBehaviour
             float f01 = (_tiempoMaximo > 0f) ? Mathf.Clamp01(_tiempoActual / _tiempoMaximo) : 0f;
             int pct = Mathf.Clamp(Mathf.CeilToInt(f01 * 100f), 0, 100);
 
-            // Querés 0% (no 000%) cuando termina
             string numero;
             if (pct <= 0)
             {
@@ -196,9 +222,8 @@ public class ControladorJuego : MonoBehaviour
             }
             else
             {
-                // Soporta que tu formato tenga o no el símbolo %
                 string tmp = string.Format(formatoPorcentaje, pct);
-                tmp = tmp.Replace("%", "").Trim(); // nos quedamos solo con el número formateado
+                tmp = tmp.Replace("%", "").Trim();
                 numero = tmp;
             }
 
@@ -249,7 +274,10 @@ public class ControladorJuego : MonoBehaviour
 
     public void ActivarTemporizador()
     {
-        _tiempoAgotadoNotificado = false; // ✅ reset del evento
+        _tiempoAgotadoNotificado = false;
+
+        // ✅ NUEVO: si arrancás de nuevo el tiempo, asumimos "no muerto"
+        SetPauseDead(false);
 
         _tiempoMaximo = Mathf.Max(0.01f, _tiempoMaximo);
         _tiempoActual = _tiempoMaximo;
@@ -263,7 +291,10 @@ public class ControladorJuego : MonoBehaviour
 
     public void ReanudarTemporizadorSinReset()
     {
-        _tiempoAgotadoNotificado = false; // ✅ reset del evento
+        _tiempoAgotadoNotificado = false;
+
+        // ✅ NUEVO
+        SetPauseDead(false);
 
         _tiempoMaximo = Mathf.Max(0.01f, _tiempoMaximo);
         _tiempoActual = Mathf.Clamp(_tiempoActual, 0f, _tiempoMaximo);
@@ -278,6 +309,9 @@ public class ControladorJuego : MonoBehaviour
     // ✅ POWER UP: restaurar a 60s (100%)
     public void RestaurarTiempoCompleto()
     {
+        // ✅ NUEVO: si volvés a tener tiempo, no tiene sentido seguir "dead" por timer
+        SetPauseDead(false);
+
         _tiempoActual = _tiempoMaximo;
 
         _backTargetFill = GetFillTargetFromTiempoActual();
@@ -310,7 +344,6 @@ public class ControladorJuego : MonoBehaviour
             SyncTiempoUI();
             ForceSetBarraTiempoFrontBack();
 
-            // ✅ queda en 0%
             ActualizarTextoTemporizador();
 
             _tiempoActivado = false;

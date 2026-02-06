@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -7,12 +6,22 @@ using UnityEngine.UI;
 public class SceneFadeUI : MonoBehaviour
 {
     [Header("Auto")]
-    public bool fadeInOnStart = true;     // LoadingScene: true / MainMenu: false
-    public float startBlackHold = 0.00f;  // mantener negro un toque antes de fade-in
+    [Tooltip("✅ Para MainMenu ponelo en TRUE (negro -> transparente al iniciar).")]
+    public bool fadeInOnStart = true;
+
+    [Tooltip("Mantener negro un toque antes del fade (opcional).")]
+    public float startBlackHold = 0.00f;
 
     [Header("Duraciones (segundos)")]
-    public float fadeInDur = 0.18f;   // negro -> transparente
-    public float fadeOutDur = 0.25f;  // transparente -> negro
+    [Tooltip("Negro -> transparente (MainMenu). Recomendado 0.6 a 1.2 para suave.")]
+    public float fadeInDur = 0.80f;
+
+    [Tooltip("Transparente -> negro (al cambiar de escena).")]
+    public float fadeOutDur = 0.25f;
+
+    [Header("Suavidad")]
+    [Tooltip("Si querés evitar cualquier flash por layouts, dejalo en 1.")]
+    public int waitFramesBeforeFadeIn = 1;
 
     [Header("Opciones")]
     public bool blockRaycastsWhileFading = true;
@@ -28,7 +37,10 @@ public class SceneFadeUI : MonoBehaviour
         if (!Application.isPlaying) return;
 
         BuildUnderVisibleCanvas();
-        SetAlpha(0f); // MainMenu NO debe quedar negro
+
+        // ✅ CLAVE: arrancar en negro si vamos a hacer fade-in, para que NO haya golpe.
+        if (fadeInOnStart) SetAlpha(1f);
+        else SetAlpha(0f);
     }
 
     IEnumerator Start()
@@ -37,7 +49,10 @@ public class SceneFadeUI : MonoBehaviour
 
         if (fadeInOnStart)
         {
-            SetAlpha(1f);
+            // ✅ Esperar frames para evitar flash de UI reacomodándose
+            for (int i = 0; i < Mathf.Max(0, waitFramesBeforeFadeIn); i++)
+                yield return null;
+
             if (startBlackHold > 0f)
                 yield return new WaitForSecondsRealtime(startBlackHold);
 
@@ -60,13 +75,8 @@ public class SceneFadeUI : MonoBehaviour
 
             int score = 0;
 
-            // Preferir Overlay
             if (c.renderMode == RenderMode.ScreenSpaceOverlay) score += 1000;
-
-            // Preferir RootCanvas
             if (c.isRootCanvas) score += 500;
-
-            // Preferir más sorting
             score += c.sortingOrder;
 
             if (score > bestScore)
@@ -76,7 +86,7 @@ public class SceneFadeUI : MonoBehaviour
             }
         }
 
-        // Si no existe Canvas, creamos uno (raro si tu UI se ve)
+        // Si no existe Canvas, creamos uno
         if (target == null)
         {
             var cgo = new GameObject("Canvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
@@ -94,7 +104,6 @@ public class SceneFadeUI : MonoBehaviour
 
         fadeGO.transform.SetParent(target.transform, false);
 
-        // ✅ FIX REAL: hacer que el FadeCanvas sea FULL SCREEN (si no, queda 100x100)
         var fadeRT = fadeGO.GetComponent<RectTransform>();
         fadeRT.anchorMin = Vector2.zero;
         fadeRT.anchorMax = Vector2.one;
@@ -109,6 +118,9 @@ public class SceneFadeUI : MonoBehaviour
         _fadeCanvas.overrideSorting = true;
         _fadeCanvas.sortingOrder = sortingOrder;
 
+        // (extra) copiar sortingLayer del canvas target para que no quede atrás por layer
+        _fadeCanvas.sortingLayerID = target.sortingLayerID;
+
         var scaler = fadeGO.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920, 1080);
@@ -117,7 +129,7 @@ public class SceneFadeUI : MonoBehaviour
         _cg.interactable = false;
         _cg.blocksRaycasts = false;
 
-        // 3) Crear Image negro fullscreen (blindado)
+        // 3) Image negro fullscreen
         var imgGO = new GameObject("FadeBlack", typeof(RectTransform), typeof(Image));
         imgGO.transform.SetParent(fadeGO.transform, false);
 
@@ -137,7 +149,6 @@ public class SceneFadeUI : MonoBehaviour
         imgGO.transform.SetAsLastSibling();
         fadeGO.transform.SetAsLastSibling();
 
-        // Fuerza rebuild por si el Canvas/Scaler se actualiza un frame después
         Canvas.ForceUpdateCanvases();
         LayoutRebuilder.ForceRebuildLayoutImmediate(fadeRT);
         LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
@@ -149,6 +160,13 @@ public class SceneFadeUI : MonoBehaviour
         var c = _fadeImg.color;
         c.a = Mathf.Clamp01(a);
         _fadeImg.color = c;
+    }
+
+    // ✅ EASING suave (S-curve)
+    static float Smooth01(float x)
+    {
+        x = Mathf.Clamp01(x);
+        return x * x * (3f - 2f * x);
     }
 
     IEnumerator FadeTo(float target, float dur)
@@ -165,7 +183,8 @@ public class SceneFadeUI : MonoBehaviour
         while (t < 1f)
         {
             t += Time.unscaledDeltaTime / dur;
-            SetAlpha(Mathf.Lerp(start, target, t));
+            float s = Smooth01(t); // ✅ suaviza mucho
+            SetAlpha(Mathf.Lerp(start, target, s));
             yield return null;
         }
 

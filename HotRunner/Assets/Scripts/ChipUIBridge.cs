@@ -1,7 +1,8 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.Rendering;
+using UnityEngine.EventSystems;
 using TMPro;
 
 public class ChipUIBridge : MonoBehaviour
@@ -108,6 +109,14 @@ public class ChipUIBridge : MonoBehaviour
     public Color texto2OutlineColor = new Color(0f, 0f, 0f, 0.85f);
     public TextAlignmentOptions texto2Alignment = TextAlignmentOptions.TopRight;
 
+    // ===== GLOBAL: ocultar SOLO prompts (Hook) sin afectar chips del panel =====
+    static readonly System.Collections.Generic.List<ChipUIBridge> _instances = new System.Collections.Generic.List<ChipUIBridge>();
+    public static bool GlobalHidePrompts = false;
+
+    [Header("Override global (opcional)")]
+    [Tooltip("Si está ON, este ChipUIBridge NO se oculta con GlobalHidePrompts.")]
+    public bool ignoreGlobalPromptHide = false;
+
     Camera camUI;
     RenderTexture rt;
     RawImage raw;
@@ -137,6 +146,50 @@ public class ChipUIBridge : MonoBehaviour
     float t0;
 
     bool _visible = true;
+
+    // ===================== GLOBAL PROMPT HIDE HELPERS =====================
+    bool IsPromptLike()
+    {
+        // Heurística: “esto parece un prompt” (Hook)
+        return modoVisibilidad == VisibilidadMode.ApuntandoALayer
+               || mostrarTecla
+               || mostrarTexto2
+               || usarAro;
+    }
+
+    public static void SetGlobalHidePrompts(bool hide)
+    {
+        GlobalHidePrompts = hide;
+
+        for (int i = _instances.Count - 1; i >= 0; i--)
+        {
+            var inst = _instances[i];
+            if (!inst) { _instances.RemoveAt(i); continue; }
+
+            if (inst.ignoreGlobalPromptHide) continue;
+
+            if (inst.IsPromptLike())
+                inst.SetVisible(!hide);
+        }
+    }
+
+    void OnEnable()
+    {
+        if (!_instances.Contains(this)) _instances.Add(this);
+
+        // Si ya estamos ocultando prompts, apagá este si corresponde
+        if (GlobalHidePrompts && !ignoreGlobalPromptHide && IsPromptLike())
+            SetVisible(false);
+    }
+
+    void OnDisable()
+    {
+        _instances.Remove(this);
+
+        // Seguridad: si lo deshabilitan, que no quede “pegado” el raw en pantalla
+        SetVisible(false);
+    }
+    // =====================================================================
 
     void Start()
     {
@@ -225,11 +278,23 @@ public class ChipUIBridge : MonoBehaviour
         posInicialLocal = transform.localPosition;
         t0 = Random.value * 10f;
 
-        SetVisible(startVisible);
+        // Si estamos ocultando prompts y este “parece prompt”, arrancá apagado
+        bool initial = startVisible;
+        if (GlobalHidePrompts && !ignoreGlobalPromptHide && IsPromptLike())
+            initial = false;
+
+        SetVisible(initial);
     }
 
     void Update()
     {
+        // Si estamos en modo “fin de nivel” y esto es un prompt, asegurarlo apagado
+        if (GlobalHidePrompts && !ignoreGlobalPromptHide && IsPromptLike())
+        {
+            if (_visible) SetVisible(false);
+            return;
+        }
+
         // Visibilidad
         if (modoVisibilidad == VisibilidadMode.SiempreVisible) SetVisible(true);
         else if (modoVisibilidad == VisibilidadMode.SiempreOculto) SetVisible(false);
@@ -305,7 +370,6 @@ public class ChipUIBridge : MonoBehaviour
         multPulse = Mathf.Max(multPulse, Mathf.Max(1.01f, pulseEscala));
     }
 
-    // Por si querés cambiar textos en runtime
     public void SetTecla(string nuevaTecla)
     {
         tecla = nuevaTecla;
@@ -397,7 +461,6 @@ public class ChipUIBridge : MonoBehaviour
             ringGlowImg = ringGlowGO.GetComponent<Image>();
             ringGlowImg.raycastTarget = false;
 
-            // un poco menos intenso que el aro base, pero “abre” el brillo
             Color cg = aroColor * Mathf.Max(1f, aroColorIntensity * 0.85f);
             cg.a = 1f;
             ringGlowImg.color = cg;
@@ -411,7 +474,6 @@ public class ChipUIBridge : MonoBehaviour
 
             ApplyRingMaterial(ringGlowImg);
 
-            // detrás del aro base
             ringGlowGO.transform.SetSiblingIndex(ringGO.transform.GetSiblingIndex());
         }
     }
@@ -420,18 +482,16 @@ public class ChipUIBridge : MonoBehaviour
     {
         if (!img) return;
 
-        // Si el usuario asignó material, lo respetamos.
         if (aroMaterialOverride)
         {
             img.material = aroMaterialOverride;
             return;
         }
 
-        // Intento de material aditivo runtime (si existe el shader).
         if (!aroUsarMaterialAdditive) return;
 
         Shader s = Shader.Find("UI/Particles/Additive");
-        if (!s) s = Shader.Find("Particles/Additive"); // fallback
+        if (!s) s = Shader.Find("Particles/Additive");
         if (!s) return;
 
         if (!_aroMatRuntime)
@@ -479,7 +539,6 @@ public class ChipUIBridge : MonoBehaviour
                 float ang = Mathf.Atan2(dy, dx);
                 if (ang < 0f) ang += Mathf.PI * 2f;
 
-                // "cabeza" del arco en ang = 0
                 float delta = ang;
                 float tail = Mathf.Exp(-delta / Mathf.Max(0.0001f, trailRad));
                 float head = Mathf.Exp(-delta / 0.18f) * headBoost;

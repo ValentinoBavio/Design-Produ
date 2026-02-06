@@ -1,12 +1,15 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using TMPro.EditorUtilities;
 
-[DefaultExecutionOrder(-10000)] // ✅ corre tempranísimo
+[DefaultExecutionOrder(-10000)]
 public class Level1IntroOverlay : MonoBehaviour
 {
+    // ✅ Flag global para crosshair
+    public static bool IsIntroActive { get; private set; } = false;
+
     [Header("Texto")]
     public TMP_FontAsset fontTMP;
     public string mainTitle = "LEVEL 1";
@@ -15,7 +18,7 @@ public class Level1IntroOverlay : MonoBehaviour
     public int subFontSize = 26;
 
     [Header("Estilo (ambos)")]
-    public Color textColor = new Color(1f, 0.84f, 0.15f, 1f); // amarillo
+    public Color textColor = new Color(1f, 0.84f, 0.15f, 1f);
     public Color outlineColor = Color.black;
     [Range(0f, 1f)] public float outlineWidth = 0.22f;
 
@@ -30,11 +33,7 @@ public class Level1IntroOverlay : MonoBehaviour
 
     [Header("Bloqueo")]
     public bool freezeTimeScale = true;
-
-    [Tooltip("Arrastrá acá: movimiento, drain de vida, timer, etc.")]
     public Behaviour[] disableDuringIntro;
-
-    [Tooltip("Opcional: si tu player usa Rigidbody, arrastralos para cortar cualquier inercia.")]
     public Rigidbody[] rigidbodiesToZero;
 
     CanvasGroup _cg;
@@ -45,9 +44,16 @@ public class Level1IntroOverlay : MonoBehaviour
     {
         if (!Application.isPlaying) return;
 
-        // ✅ BLOQUEO INMEDIATO (antes del primer frame)
+        // ✅ IMPORTANTE: al iniciar nivel, aseguramos que NO quede el flag global de prompts prendido
+        // (por si reinicias escena o venís de otra escena).
+        ChipUIBridge.SetGlobalHidePrompts(false);
+
+        IsIntroActive = true;
         LockNow();
     }
+
+    void OnDisable() { IsIntroActive = false; }
+    void OnDestroy() { IsIntroActive = false; }
 
     void LockNow()
     {
@@ -62,7 +68,6 @@ public class Level1IntroOverlay : MonoBehaviour
 
         SetEnabled(disableDuringIntro, false);
 
-        // Si hay rigidbodies, cortamos velocidad por las dudas
         if (rigidbodiesToZero != null)
         {
             for (int i = 0; i < rigidbodiesToZero.Length; i++)
@@ -77,27 +82,22 @@ public class Level1IntroOverlay : MonoBehaviour
 
     IEnumerator Start()
     {
-        // armar overlay
         BuildTextOverlay();
 
-        // hold (tiempo real)
         yield return WaitUnscaled(holdSeconds);
-
-        // fade out del texto
         yield return FadeTextAlpha(0f, textFadeOutDur);
 
         if (_cg) Destroy(_cg.gameObject);
 
-        // liberar
         SetEnabled(disableDuringIntro, true);
 
         if (freezeTimeScale)
             Time.timeScale = _oldTimeScale <= 0f ? 1f : _oldTimeScale;
 
         _locked = false;
+        IsIntroActive = false;
     }
 
-    // ---------- UI ----------
     void BuildTextOverlay()
     {
         Canvas target = FindBestCanvas();
@@ -171,7 +171,6 @@ public class Level1IntroOverlay : MonoBehaviour
         return tmp;
     }
 
-    // ✅ outline negro REAL (material instancia) + desactiva underlay/glow
     void ApplyStyle_FORCE_MATERIAL(TextMeshProUGUI tmp)
     {
         if (!tmp) return;
@@ -190,7 +189,6 @@ public class Level1IntroOverlay : MonoBehaviour
         mat.SetColor(ShaderUtilities.ID_OutlineColor, oc);
         mat.SetFloat(ShaderUtilities.ID_OutlineWidth, outlineWidth);
 
-        // Underlay off
         mat.SetColor(ShaderUtilities.ID_UnderlayColor, new Color(0, 0, 0, 0));
         mat.SetFloat(ShaderUtilities.ID_UnderlayOffsetX, 0f);
         mat.SetFloat(ShaderUtilities.ID_UnderlayOffsetY, 0f);
@@ -225,20 +223,21 @@ public class Level1IntroOverlay : MonoBehaviour
         return best;
     }
 
-    // ---------- Fade texto ----------
     IEnumerator FadeTextAlpha(float target, float dur)
     {
-        float start = _cg ? _cg.alpha : 1f;
+        if (!_cg) yield break;
+
+        float start = _cg.alpha;
         dur = Mathf.Max(0.01f, dur);
 
         float t = 0f;
         while (t < 1f)
         {
             t += Time.unscaledDeltaTime / dur;
-            if (_cg) _cg.alpha = Mathf.Lerp(start, target, t);
+            _cg.alpha = Mathf.Lerp(start, target, t);
             yield return null;
         }
-        if (_cg) _cg.alpha = target;
+        _cg.alpha = target;
     }
 
     static IEnumerator WaitUnscaled(float seconds)

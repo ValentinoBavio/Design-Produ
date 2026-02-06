@@ -1,5 +1,3 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 public class GrappleCrosshair : MonoBehaviour
@@ -27,8 +25,32 @@ public class GrappleCrosshair : MonoBehaviour
 
     static Texture2D _tex;
 
+    bool ShouldHide()
+    {
+        // ✅ GameOver
+        if (GameOverManager.IsGameOverActive) return true;
+
+        // ✅ Pausa / muerto (aunque no sea game over todavía)
+        if (PauseMenu.IsPausedGlobal) return true;
+        if (PauseMenu.IsPlayerDeadGlobal) return true;
+
+        // ✅ Intro del nivel (título)
+        if (Level1IntroOverlay.IsIntroActive) return true;
+
+        // ✅ Resultados / Score screen
+        if (ResultadosNivelUI.IsResultsVisible) return true;
+
+        return false;
+    }
+
     void OnGUI()
     {
+        // No gastes CPU ni dibujes si no corresponde
+        if (ShouldHide()) return;
+
+        // Dibujá solo en repaint (evita trabajo extra de OnGUI)
+        if (Event.current != null && Event.current.type != EventType.Repaint) return;
+
         if (_tex == null)
         {
             _tex = new Texture2D(1, 1, TextureFormat.ARGB32, false);
@@ -77,13 +99,14 @@ public class GrappleCrosshair : MonoBehaviour
 
         GUI.color = col;
 
+        // arriba
         GUI.DrawTexture(new Rect(cx - T * 0.5f, cy - G - L, T, L), _tex);
-
+        // abajo
         GUI.DrawTexture(new Rect(cx - T * 0.5f, cy + G,     T, L), _tex);
-
-        GUI.DrawTexture(new Rect(cx - G - L,   cy - T*0.5f, L, T), _tex);
-
-        GUI.DrawTexture(new Rect(cx + G,       cy - T*0.5f, L, T), _tex);
+        // izquierda
+        GUI.DrawTexture(new Rect(cx - G - L,   cy - T * 0.5f, L, T), _tex);
+        // derecha
+        GUI.DrawTexture(new Rect(cx + G,       cy - T * 0.5f, L, T), _tex);
 
         GUI.color = Color.white;
     }

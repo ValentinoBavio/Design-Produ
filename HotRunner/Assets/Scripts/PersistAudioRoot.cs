@@ -1,203 +1,181 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
+[DefaultExecutionOrder(-1000)]
 public class PersistAudioRoot : MonoBehaviour
 {
-    [Header("Dueños que TIENEN los AudioSources loop (arrastrá acá tus GO de audio)")]
-    public GameObject[] owners;
+    [Header("Persistencia")]
+    [Tooltip("Si este GameObject está bajo un parent, se desparenta automáticamente para que DontDestroyOnLoad funcione.")]
+    public bool forceRoot = true;
 
-    [Header("Búsqueda")]
-    public bool includeChildren = false;
-    public bool mirrorOnlyLooping = true;
+    [Tooltip("Mantener este GameObject vivo entre escenas.")]
+    public bool persistAcrossScenes = true;
 
-    [Header("Comportamiento")]
-    [Tooltip("Mutea los originales para que NO dupliquen. Los clones son los que se escuchan.")]
-    public bool muteOriginals = true;
+    [Header("Mirrors (opcional)")]
+    [Tooltip("Si está ON, crea mirrors de los AudioSources que encuentre en hijos (útil para persistir/duplicar fuentes).")]
+    public bool buildMirrorsOnStart = true;
 
-    [Header("Auto-destruir")]
-    public bool destroyOnScene = true;
-    public string sceneNameToDestroyOn = "Level1";
+    [Tooltip("Incluye AudioSources inactivos al buscar.")]
+    public bool includeInactive = true;
 
-    class Mirror
-    {
-        public AudioSource src;
-        public AudioSource clone;
-        public bool cloneStarted;
-    }
+    [Tooltip("Si está ON, deshabilita los AudioSources originales después de crear el mirror (evita doble audio).")]
+    public bool disableOriginalSources = false;
 
-    readonly List<Mirror> _mirrors = new List<Mirror>();
-    bool _built;
+    [Tooltip("Nombre del contenedor donde se crean los mirrors.")]
+    public string mirrorsContainerName = "_AudioMirrors";
+
+    [Header("Debug")]
+    public bool logDebug = false;
+
+    // Interno
+    private bool _didDontDestroy;
+    private Transform _mirrorsContainer;
+    private readonly List<AudioSource> _mirrors = new List<AudioSource>();
 
     void Awake()
     {
-        if (!Application.isPlaying) return;
-        DontDestroyOnLoad(gameObject);
+        EnsureRootAndPersist();
+    }
+
+    // En tu stacktrace se ve que Start es coroutine, lo mantenemos así
+    IEnumerator Start()
+    {
+        // Espera 1 frame por si algo arma audio en Awake/Start de otros scripts
+        yield return null;
+
+        EnsureRootAndPersist();
+
+        if (buildMirrorsOnStart)
+            BuildMirrors();
     }
 
     void OnEnable()
     {
-        if (!Application.isPlaying) return;
-        SceneManager.sceneLoaded += OnSceneLoaded;
+        EnsureRootAndPersist();
     }
 
-    void OnDisable()
+    void EnsureRootAndPersist()
     {
         if (!Application.isPlaying) return;
-        SceneManager.sceneLoaded -= OnSceneLoaded;
-    }
 
-    void OnSceneLoaded(Scene scene, LoadSceneMode mode)
-    {
-        if (!destroyOnScene) return;
-
-        if (scene.name == sceneNameToDestroyOn)
+        // ✅ 1) Asegurar que sea ROOT para que DontDestroyOnLoad funcione
+        if (forceRoot && transform.parent != null)
         {
-            // desmuteo originales por si siguen existiendo
-            for (int i = 0; i < _mirrors.Count; i++)
-                if (_mirrors[i] != null && _mirrors[i].src) _mirrors[i].src.mute = false;
+            if (logDebug) Debug.Log($"[PersistAudioRoot] Desparentando '{name}' para que sea ROOT.");
+            transform.SetParent(null, true);
+        }
 
-            Destroy(gameObject);
+        // ✅ 2) DontDestroyOnLoad SOLO sobre el root gameObject (una sola vez)
+        if (persistAcrossScenes && !_didDontDestroy)
+        {
+            DontDestroyOnLoad(gameObject);
+            _didDontDestroy = true;
+
+            if (logDebug) Debug.Log($"[PersistAudioRoot] DontDestroyOnLoad aplicado a '{name}'.");
         }
     }
 
-    IEnumerator Start()
+    [ContextMenu("Rebuild Mirrors")]
+    public void BuildMirrors()
     {
-        if (!Application.isPlaying) yield break;
+        EnsureRootAndPersist();
 
-        // Esperar 1 frame por si tus AudioSources se crean por script en Awake/Start
-        yield return null;
+        // Limpieza previa
+        ClearMirrors();
 
-        BuildMirrors();
+        // Crear/obtener contenedor
+        _mirrorsContainer = transform.Find(mirrorsContainerName);
+        if (_mirrorsContainer == null)
+        {
+            var go = new GameObject(mirrorsContainerName);
+            go.transform.SetParent(transform, false);
+            _mirrorsContainer = go.transform;
+        }
+
+        // Buscar audios (excepto los que ya estén dentro del contenedor de mirrors)
+        var sources = GetComponentsInChildren<AudioSource>(includeInactive);
+        int created = 0;
+
+        foreach (var src in sources)
+        {
+            if (src == null) continue;
+
+            // Evitar espejar los mirrors mismos
+            if (_mirrorsContainer != null && src.transform.IsChildOf(_mirrorsContainer))
+                continue;
+
+            // Crear mirror
+            var mgo = new GameObject(src.gameObject.name + "_Mirror");
+            mgo.transform.SetParent(_mirrorsContainer, false);
+
+            var mirror = mgo.AddComponent<AudioSource>();
+            CopyAudioSourceSettings(src, mirror);
+
+            // Si el original estaba sonando, el mirror arranca
+            if (src.isPlaying && src.clip != null)
+            {
+                mirror.time = Mathf.Clamp(src.time, 0f, src.clip.length);
+                mirror.Play();
+            }
+            else if (mirror.playOnAwake && mirror.clip != null)
+            {
+                // Respeta playOnAwake del original
+                mirror.Play();
+            }
+
+            _mirrors.Add(mirror);
+            created++;
+
+            if (disableOriginalSources)
+                src.enabled = false;
+        }
+
+        if (logDebug) Debug.Log($"[PersistAudioRoot] Mirrors creados: {created}");
     }
 
-    void BuildMirrors()
+    void CopyAudioSourceSettings(AudioSource src, AudioSource dst)
     {
-        if (_built) return;
-        _built = true;
+        // Copia settings comunes (seguro / sin reflection)
+        dst.clip = src.clip;
+        dst.outputAudioMixerGroup = src.outputAudioMixerGroup;
 
+        dst.mute = src.mute;
+        dst.bypassEffects = src.bypassEffects;
+        dst.bypassListenerEffects = src.bypassListenerEffects;
+        dst.bypassReverbZones = src.bypassReverbZones;
+
+        dst.playOnAwake = src.playOnAwake;
+        dst.loop = src.loop;
+        dst.priority = src.priority;
+        dst.volume = src.volume;
+        dst.pitch = src.pitch;
+        dst.panStereo = src.panStereo;
+
+        dst.spatialBlend = src.spatialBlend;
+        dst.reverbZoneMix = src.reverbZoneMix;
+        dst.dopplerLevel = src.dopplerLevel;
+        dst.spread = src.spread;
+
+        dst.minDistance = src.minDistance;
+        dst.maxDistance = src.maxDistance;
+        dst.rolloffMode = src.rolloffMode;
+
+        dst.ignoreListenerVolume = src.ignoreListenerVolume;
+        dst.ignoreListenerPause = src.ignoreListenerPause;
+    }
+
+    void ClearMirrors()
+    {
         _mirrors.Clear();
 
-        if (owners == null || owners.Length == 0)
+        var existing = transform.Find(mirrorsContainerName);
+        if (existing != null)
         {
-            Debug.LogWarning("[PersistLoopAudioMirror] No hay owners asignados.");
-            return;
+            if (Application.isPlaying) Destroy(existing.gameObject);
+            else DestroyImmediate(existing.gameObject);
         }
 
-        foreach (var o in owners)
-        {
-            if (!o) continue;
-
-            var sources = includeChildren ? o.GetComponentsInChildren<AudioSource>(true) : o.GetComponents<AudioSource>();
-            foreach (var s in sources)
-            {
-                if (!s) continue;
-                if (mirrorOnlyLooping && !s.loop) continue;
-
-                var m = new Mirror();
-                m.src = s;
-
-                var go = new GameObject("Mirror_" + s.gameObject.name + "_" + s.GetInstanceID());
-                go.transform.SetParent(transform, false);
-                DontDestroyOnLoad(go);
-
-                m.clone = go.AddComponent<AudioSource>();
-                CopySettings(s, m.clone);
-
-                if (s.clip && s.isPlaying)
-                {
-                    m.clone.clip = s.clip;
-                    m.clone.Play();
-                    SafeSyncTimeSamples(s, m.clone);
-                    m.cloneStarted = true;
-                }
-
-                if (muteOriginals)
-                    s.mute = true;
-
-                _mirrors.Add(m);
-            }
-        }
-    }
-
-    void Update()
-    {
-        if (!Application.isPlaying) return;
-        if (_mirrors.Count == 0) return;
-
-        for (int i = 0; i < _mirrors.Count; i++)
-        {
-            var m = _mirrors[i];
-            if (m == null || !m.clone) continue;
-
-            var s = m.src;
-
-            if (s)
-            {
-                if (muteOriginals)
-                    s.mute = true;
-
-                CopySettings(s, m.clone);
-
-                if (m.clone.clip != s.clip)
-                {
-                    m.clone.clip = s.clip;
-                    if (s.clip && s.isPlaying)
-                    {
-                        if (!m.clone.isPlaying) m.clone.Play();
-                        SafeSyncTimeSamples(s, m.clone);
-                        m.cloneStarted = true;
-                    }
-                }
-
-                if (s.clip && s.isPlaying)
-                {
-                    if (!m.clone.isPlaying)
-                    {
-                        m.clone.Play();
-                        SafeSyncTimeSamples(s, m.clone);
-                        m.cloneStarted = true;
-                    }
-                    else
-                    {
-                        int diff = Mathf.Abs(SafeGetTimeSamples(s) - SafeGetTimeSamples(m.clone));
-                        if (diff > 4000) // ~0.09s a 44.1k
-                            SafeSyncTimeSamples(s, m.clone);
-                    }
-                }
-                // Si el original se detuvo, el clone sigue solo.
-            }
-        }
-    }
-
-    static void CopySettings(AudioSource from, AudioSource to)
-    {
-        to.outputAudioMixerGroup = from.outputAudioMixerGroup;
-        to.volume = from.volume;
-        to.pitch = from.pitch;
-        to.loop = true;
-        to.spatialBlend = from.spatialBlend;
-        to.panStereo = from.panStereo;
-        to.priority = from.priority;
-        to.ignoreListenerPause = from.ignoreListenerPause;
-        to.ignoreListenerVolume = from.ignoreListenerVolume;
-    }
-
-    static int SafeGetTimeSamples(AudioSource a)
-    {
-        try { return a.timeSamples; } catch { return 0; }
-    }
-
-    static void SafeSyncTimeSamples(AudioSource from, AudioSource to)
-    {
-        if (!from.clip || !to.clip) return;
-        try
-        {
-            int ts = from.timeSamples;
-            ts = Mathf.Clamp(ts, 0, to.clip.samples - 1);
-            to.timeSamples = ts;
-        }
-        catch { }
+        _mirrorsContainer = null;
     }
 }

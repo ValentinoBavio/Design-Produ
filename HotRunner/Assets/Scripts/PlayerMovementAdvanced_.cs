@@ -43,6 +43,7 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
     public KeyCode jumpKey = KeyCode.Space;
     public KeyCode sprintKey = KeyCode.LeftShift;
     public KeyCode crouchKey = KeyCode.LeftControl; // tap = slide, hold = crouch
+    public KeyCode crouchKeyAlt = KeyCode.C;        // ✅ adicional: también agacharse con C
 
     // ===================== AUDIO NUEVO =====================
     [Header("Audio - Source")]
@@ -444,8 +445,8 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
         if (wallRunningNow && Time.time >= _statusLockUntil)
             SetStaminaStatus(staminaLabelWallRun, true);
 
-        bool crouchHeld = Input.GetKey(crouchKey);
-        bool crouchPressed = Input.GetKeyDown(crouchKey);
+        bool crouchHeld = Input.GetKey(crouchKey) || Input.GetKey(crouchKeyAlt);
+        bool crouchPressed = Input.GetKeyDown(crouchKey) || Input.GetKeyDown(crouchKeyAlt);
         bool sprintHeld = Input.GetKey(sprintKey);
 
         // START SLIDE
@@ -480,7 +481,7 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
         // =================================
 
         if (!isSliding && isGrounded)
-            targetSpeed = Input.GetKey(crouchKey) ? crouchSpeed : (sprintHeld ? sprintSpeed : walkSpeed);
+            targetSpeed = crouchHeld ? crouchSpeed : (sprintHeld ? sprintSpeed : walkSpeed);
 
         if (isSliding)
             timeAirWhileSliding = isGrounded ? 0f : timeAirWhileSliding + Time.deltaTime;
@@ -594,7 +595,7 @@ public class PlayerMovementAdvanced_ : MonoBehaviour
             if (slopeAssist > 0f && downSlope != Vector3.zero)
                 rb.AddForce(downSlope * slopeAssist, ForceMode.Acceleration);
 
-            bool crouchHeld = Input.GetKey(crouchKey);
+            bool crouchHeld = Input.GetKey(crouchKey) || Input.GetKey(crouchKeyAlt);
             if (isGrounded && !lastGroundIsSlope && slideExitLockTimer <= 0f)
             {
                 isSliding = false;

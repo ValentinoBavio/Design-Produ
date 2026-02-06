@@ -7,8 +7,33 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using TMPro;
 
+[DefaultExecutionOrder(-950)]
 public class MainMenuAudio : MonoBehaviour
 {
+    // =========================
+    //  SINGLETON + PERSIST
+    // =========================
+    public static MainMenuAudio Instance;
+
+    [Header("Persistencia Menu -> Loading -> ...")]
+    [Tooltip("Si está ON, este objeto no se destruye al cambiar de escena (Menu->Loading).")]
+    public bool persistBetweenScenes = true;
+
+    [Tooltip("Nombre de la escena del menú. Si queda vacío, usa la escena en la que nació este objeto.")]
+    public string mainMenuSceneName = "";
+
+    [Tooltip("Escenas donde el audio del menú debe apagarse (por ej: Level1).")]
+    public string[] stopOnSceneNames = { "Level1" };
+
+    [Tooltip("Fade out (segundos) al entrar a esas escenas.")]
+    public float stopFadeSeconds = 2f;
+
+    [Tooltip("Si está ON, destruye este objeto luego del fade (recomendado).")]
+    public bool destroyAfterStop = true;
+
+    // =========================
+    //  TU CONFIG ORIGINAL
+    // =========================
     [Header("Mixer Groups (recomendado)")]
     public AudioMixerGroup bgmGroup;
     public AudioMixerGroup sfxGroup;
@@ -110,8 +135,44 @@ public class MainMenuAudio : MonoBehaviour
 
     bool _wired = false;
 
+    // --- Persist/Scene state ---
+    bool _inMenuScene = true;
+    bool _fadeStopRunning = false;
+
+    void OnEnable()
+    {
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    void OnDisable()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
     void Awake()
     {
+        // -------- singleton --------
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = this;
+
+        // nombre de escena del menú (si no lo seteaste)
+        if (string.IsNullOrEmpty(mainMenuSceneName))
+            mainMenuSceneName = SceneManager.GetActiveScene().name;
+
+        _inMenuScene = (SceneManager.GetActiveScene().name == mainMenuSceneName);
+
+        // -------- persist --------
+        if (persistBetweenScenes)
+        {
+            if (transform.parent != null) transform.SetParent(null, true);
+            DontDestroyOnLoad(gameObject);
+        }
+
+        // -------- audios --------
         _bgm = gameObject.AddComponent<AudioSource>();
         _bgm.loop = true; _bgm.playOnAwake = false; _bgm.volume = bgmVol; _bgm.spatialBlend = 0f;
         if (bgmGroup) _bgm.outputAudioMixerGroup = bgmGroup;
@@ -137,16 +198,87 @@ public class MainMenuAudio : MonoBehaviour
 
     void Start()
     {
-        if (ocultarCursor) Cursor.visible = false;
-        if (bloquearMouseUI) BlockMouseUI();
+        if (_inMenuScene)
+        {
+            if (ocultarCursor) Cursor.visible = false;
+            if (bloquearMouseUI) BlockMouseUI();
 
-        StartCoroutine(CoSelectFirst());
+            StartCoroutine(CoSelectFirst());
 
-        if (bgmPlayOnStart && bgmMainMenu) PlayBGM();
-        if (ambientPlayOnStart && ambientLoop) PlayAmbient();
+            if (bgmPlayOnStart && bgmMainMenu) PlayBGM();
+            if (ambientPlayOnStart && ambientLoop) PlayAmbient();
 
-        if (autoWireUI)
-            StartCoroutine(CoAutoWireNextFrame());
+            if (autoWireUI)
+                StartCoroutine(CoAutoWireNextFrame());
+        }
+        else
+        {
+            // Si este objeto nació fuera del menú por algún motivo, igual no rompemos nada.
+            if (bgmPlayOnStart && bgmMainMenu && !_bgm.isPlaying) PlayBGM();
+            if (ambientPlayOnStart && ambientLoop && !_amb.isPlaying) PlayAmbient();
+        }
+    }
+
+    void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        _inMenuScene = (scene.name == mainMenuSceneName);
+
+        // Al salir del menú: apagamos loops “de UI” para que no queden colgados
+        if (!_inMenuScene)
+        {
+            SetFocusLaptopLoop(false);
+            if (_typing != null && _typing.isPlaying) _typing.Stop();
+        }
+
+        // Si entramos a Level1 (o la escena que definas), hacemos fade out de 2s y apagamos
+        if (ShouldStopOnScene(scene.name))
+        {
+            if (!_fadeStopRunning)
+                StartCoroutine(CoFadeOutAndStopMenuAudio());
+        }
+    }
+
+    bool ShouldStopOnScene(string sceneName)
+    {
+        if (stopOnSceneNames == null || stopOnSceneNames.Length == 0) return false;
+        for (int i = 0; i < stopOnSceneNames.Length; i++)
+        {
+            var s = stopOnSceneNames[i];
+            if (string.IsNullOrEmpty(s)) continue;
+            if (string.Equals(sceneName, s, System.StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    IEnumerator CoFadeOutAndStopMenuAudio()
+    {
+        _fadeStopRunning = true;
+
+        float dur = Mathf.Max(0.01f, stopFadeSeconds);
+        float t = 0f;
+
+        float bgmStart = _bgm ? _bgm.volume : 0f;
+        float ambStart = _amb ? _amb.volume : 0f;
+
+        while (t < 1f)
+        {
+            t += Time.unscaledDeltaTime / dur;
+            float k = Mathf.Clamp01(t);
+
+            if (_bgm) _bgm.volume = Mathf.Lerp(bgmStart, 0f, k);
+            if (_amb) _amb.volume = Mathf.Lerp(ambStart, 0f, k);
+
+            yield return null;
+        }
+
+        if (_bgm) { _bgm.volume = 0f; if (_bgm.isPlaying) _bgm.Stop(); }
+        if (_amb) { _amb.volume = 0f; if (_amb.isPlaying) _amb.Stop(); }
+
+        _fadeStopRunning = false;
+
+        if (destroyAfterStop)
+            Destroy(gameObject);
     }
 
     IEnumerator CoSelectFirst()
@@ -170,6 +302,10 @@ public class MainMenuAudio : MonoBehaviour
 
     void Update()
     {
+        // ✅ Si ya no estamos en el menú, no corremos nada de UI/focus/typing,
+        // pero la música (AudioSource loop) sigue sonando igual.
+        if (!_inMenuScene) return;
+
         if (usarDetectorLaptop) HandleLaptopFocus();
 
         HandleMoveSoundBySelection();
@@ -184,7 +320,6 @@ public class MainMenuAudio : MonoBehaviour
         if (_wired) return;
         _wired = true;
 
-        // Botones (incluye inactivos)
         var buttons = FindObjectsOfType<Button>(true);
         for (int i = 0; i < buttons.Length; i++)
         {
@@ -193,7 +328,6 @@ public class MainMenuAudio : MonoBehaviour
 
             string label = GetUILabelOrName(b.gameObject);
 
-            // EXIT: reemplazar onClick para poder esperar audio antes de salir
             if (MatchesTokens(label, tokExit))
             {
                 if (overrideExitInitOnClick)
@@ -203,24 +337,21 @@ public class MainMenuAudio : MonoBehaviour
                 continue;
             }
 
-            // INIT: reemplazar onClick para esperar audio antes de cargar
             if (MatchesTokens(label, tokInit))
             {
                 if (overrideExitInitOnClick)
                     b.onClick.RemoveAllListeners();
 
-                b.onClick.AddListener(() => InitSessionAndLoad());
+                b.onClick.AddListener(() => InitSessionPressed());
                 continue;
             }
 
-            // BACK: siempre su propio sonido (nunca Select)
             if (MatchesTokens(label, tokBack))
             {
                 b.onClick.AddListener(() => PlayBackSFX());
                 continue;
             }
 
-            // SYS CONFIG / LOGS: suena Select
             if (MatchesTokens(label, tokSysConfig) || MatchesTokens(label, tokLogs))
             {
                 b.onClick.AddListener(() => PlaySelectSFX());
@@ -228,21 +359,17 @@ public class MainMenuAudio : MonoBehaviour
             }
         }
 
-        // Sliders: slice por OnValueChanged (más fiable que comparar valores)
         var sliders = FindObjectsOfType<Slider>(true);
         for (int i = 0; i < sliders.Length; i++)
         {
             var s = sliders[i];
             if (!s) continue;
-
-            // evitamos duplicar listeners si el objeto se reinicia en play
             s.onValueChanged.AddListener(_ => PlaySliceSFX());
         }
     }
 
     string GetUILabelOrName(GameObject go)
     {
-        // Primero intentamos texto visible del botón
         var tmp = go.GetComponentInChildren<TMP_Text>(true);
         if (tmp && !string.IsNullOrEmpty(tmp.text))
             return tmp.text.Trim().ToLowerInvariant();
@@ -251,7 +378,6 @@ public class MainMenuAudio : MonoBehaviour
         if (txt && !string.IsNullOrEmpty(txt.text))
             return txt.text.Trim().ToLowerInvariant();
 
-        // fallback: nombre del GO
         return go.name.Trim().ToLowerInvariant();
     }
 
@@ -321,7 +447,7 @@ public class MainMenuAudio : MonoBehaviour
         }
     }
 
-    // ---------------- Slider slice (fallback por comparación) ----------------
+    // ---------------- Slider slice ----------------
     void CacheSliderIfAny(GameObject go)
     {
         _lastSlider = null;
@@ -333,7 +459,6 @@ public class MainMenuAudio : MonoBehaviour
 
     void HandleSliderSlice()
     {
-        // Si ya estás usando auto-wire por onValueChanged, esto igual no molesta.
         if (!sfxSlice) return;
         if (!_lastSlider) return;
 
@@ -530,6 +655,24 @@ public class MainMenuAudio : MonoBehaviour
         StartCoroutine(CoPlayThenQuit(sfxExitTerminal));
     }
 
+    // ✅ INIT SESSION -> Rosty primero
+    void InitSessionPressed()
+    {
+        if (TryStartRostyIntro())
+            return;
+
+        InitSessionAndLoad();
+    }
+
+    bool TryStartRostyIntro()
+    {
+        var rig = FindObjectOfType<LaptopMenuRenderTextureRig>(true);
+        if (rig == null) return false;
+
+        rig.ExternalInitSession();
+        return true;
+    }
+
     public void InitSessionAndLoad()
     {
         StartCoroutine(CoPlayThenLoadScene(sfxInitSession, loadingSceneName));
@@ -537,6 +680,7 @@ public class MainMenuAudio : MonoBehaviour
 
     IEnumerator CoPlayThenQuit(AudioClip clip)
     {
+        // En QUIT sí apagamos todo
         StopBGM();
         StopAmbient();
         SetFocusLaptopLoop(false);
@@ -559,8 +703,8 @@ public class MainMenuAudio : MonoBehaviour
 
     IEnumerator CoPlayThenLoadScene(AudioClip clip, string sceneName)
     {
-        StopBGM();
-        StopAmbient();
+        // ✅ CLAVE: al ir a LOADING NO apagamos BGM/AMBIENT
+        // (solo cortamos loops "de UI")
         SetFocusLaptopLoop(false);
         if (_typing.isPlaying) _typing.Stop();
 
